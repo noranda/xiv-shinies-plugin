@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text.Json.Nodes;
 using Xunit;
 using XIVShinies.SyncPlugin;
@@ -227,5 +228,85 @@ public class CollectorRunnerTests
 
         Assert.Equal(7851u, snapshot.Collections["items"].AsArray()[0]!["id"]!.GetValue<uint>());
         Assert.Equal(7u, snapshot.Collections["quests"].AsArray()[0]!.GetValue<uint>());
+    }
+
+    // Collection runs on the game's framework thread, which has ~16ms to draw a frame. The runner
+    // measures what each collector spends so the orchestrator can report it; the plugin is expected
+    // to grow more collectors, and an unmeasured cost is one nobody notices until it stutters.
+    [Fact]
+    public void Every_collector_that_runs_is_timed()
+    {
+        var snapshot = CollectorRunner.Run(
+            new ICollector[] { Collecting("quests", 1), Collecting("mounts", 2) },
+            OptedIn("quests", "mounts"),
+            RemoteConfig());
+
+        Assert.Equal(2, snapshot.Durations.Count);
+        Assert.True(snapshot.Durations.ContainsKey("quests"));
+        Assert.True(snapshot.Durations.ContainsKey("mounts"));
+    }
+
+    // The test above would still pass an implementation that recorded a hardcoded zero for every
+    // collector. This one would not: a collector that demonstrably takes time must report time.
+    [Fact]
+    public void A_collector_that_takes_time_reports_a_nonzero_duration()
+    {
+        var slow = new FakeCollector(UnknownCategory, () =>
+        {
+            // Busy-wait rather than Thread.Sleep: sleeping yields a duration the OS scheduler chose,
+            // while spinning guarantees the stopwatch observes real elapsed work. A few milliseconds
+            // is far above any timer resolution concern.
+            var until = Stopwatch.GetTimestamp() + (Stopwatch.Frequency / 500); // ~2ms
+            while (Stopwatch.GetTimestamp() < until)
+            {
+            }
+
+            return CollectResult.Ids(new uint[] { 1 });
+        });
+
+        var snapshot = CollectorRunner.Run(new[] { slow }, OptedIn(UnknownCategory), RemoteConfig());
+
+        Assert.True(snapshot.Durations[UnknownCategory] > TimeSpan.Zero);
+    }
+
+    // A collector that is slow AND throws is precisely the one worth seeing in the log, so the
+    // failure path is timed too.
+    [Fact]
+    public void A_collector_that_throws_is_still_timed()
+    {
+        var thrower = new FakeCollector(UnknownCategory, () => throw new InvalidOperationException("boom"));
+
+        var snapshot = CollectorRunner.Run(new[] { thrower }, OptedIn(UnknownCategory), RemoteConfig());
+
+        Assert.True(snapshot.Durations.ContainsKey(UnknownCategory));
+        Assert.False(snapshot.Collections.ContainsKey(UnknownCategory));
+    }
+
+    // A disabled category never runs, so it has no cost to report. Recording a zero would imply it
+    // was measured, which would be a lie.
+    [Fact]
+    public void A_category_the_user_disabled_is_not_timed_because_it_never_ran()
+    {
+        var snapshot = CollectorRunner.Run(
+            new[] { Collecting(UnknownCategory, 1) },
+            OptedIn(), // opted into nothing
+            RemoteConfig());
+
+        Assert.Empty(snapshot.Durations);
+    }
+
+    // A snapshot built by hand (in a test, or by a future caller) need not carry timings, so the
+    // dictionary defaults to empty rather than null. Callers can enumerate it unconditionally.
+    [Fact]
+    public void Durations_default_to_empty_rather_than_null()
+    {
+        var snapshot = new CollectionSnapshot
+        {
+            Collections = new Dictionary<string, JsonNode>(),
+            Skipped = new Dictionary<string, string>(),
+        };
+
+        Assert.NotNull(snapshot.Durations);
+        Assert.Empty(snapshot.Durations);
     }
 }

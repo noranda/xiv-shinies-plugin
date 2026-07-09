@@ -29,7 +29,7 @@ namespace XIVShinies.SyncPlugin.Collectors;
 // Generics let one class serve every sheet: `ExcelUnlockCollector<Quest>` and
 // `ExcelUnlockCollector<Mount>` are distinct types the compiler generates from this one
 // definition, exactly like a generic in TypeScript.
-public sealed class ExcelUnlockCollector<TRow> : ICollector
+public sealed class ExcelUnlockCollector<TRow> : ICollector, IUnlockAware
     where TRow : struct, IExcelRow<TRow>
 {
     private readonly IDataManager dataManager;
@@ -72,6 +72,12 @@ public sealed class ExcelUnlockCollector<TRow> : ICollector
 
     /// <inheritdoc/>
     public string CategoryKey { get; }
+
+    /// <inheritdoc/>
+    // Each collector recognises only its own sheet, so routing an unlock needs no lookup table and
+    // no branch on category names. `Is<TRow>()` compares the row type the game reported against the
+    // one this collector was built for.
+    public bool Handles(RowRef rowRef) => rowRef.Is<TRow>();
 
     /// <inheritdoc/>
     // This collector needs nothing from the context; sheet-backed unlocks are self-contained.

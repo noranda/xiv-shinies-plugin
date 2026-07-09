@@ -54,6 +54,6 @@ public static class CollectorRegistry
 
             // The odd one out: it reports possession counts rather than IDs, and it only looks at
             // the items the server named in its manifest. The runner treats it like any other.
-            new ItemCollector(dataManager, framework),
+            new ItemCollector(CategoryKeys.Items, dataManager, framework),
         };
 }

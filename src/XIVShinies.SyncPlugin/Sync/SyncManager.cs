@@ -1,0 +1,621 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Dalamud.Plugin.Services;
+using Lumina.Excel;
+using XIVShinies.SyncPlugin.Api;
+using XIVShinies.SyncPlugin.Collectors;
+
+namespace XIVShinies.SyncPlugin.Sync;
+
+/// <summary>
+/// The orchestrator: listens to the game, decides nothing itself, and does the work.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Every policy question this class faces is answered somewhere else, by a class with no game and no
+/// network in it: <see cref="UploadGate"/> says whether an upload is allowed, <see cref="SyncScheduler"/>
+/// says when and what, <see cref="RetryPolicy"/> says what to do about a failure,
+/// <see cref="CollectorSelection"/> says which collectors run, and <see cref="SyncPayloadBuilder"/>
+/// says what the body looks like. That is what makes those parts unit-testable, and it is why this
+/// class cannot be — it holds Dalamud services, so merely constructing it requires the game process.
+/// It is verified by in-game QA instead.
+/// </para>
+/// <para>
+/// <b>Threading.</b> Two worlds meet here. Game state may only be read on the framework thread, and
+/// HTTP may never run on it. So collection happens inside the per-frame <c>Update</c> handler, and
+/// the resulting payload — a plain object with no game handles left in it — is uploaded on a
+/// background task. Nothing ever blocks the framework thread waiting for a response.
+/// </para>
+/// <para>
+/// <b>Nothing here fires on its own before the user opts in.</b> The constructor subscribes to game
+/// events, but every path out of them runs through <see cref="UploadGate"/> first.
+/// </para>
+/// </remarks>
+internal sealed class SyncManager : IDisposable
+{
+    /// <summary>How often to re-fetch <c>/config</c>, per the contract's "roughly every 30 minutes".</summary>
+    private static readonly TimeSpan ConfigPollInterval = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// How long to wait after the login event before reading the character.
+    /// </summary>
+    /// <remarks>
+    /// The <c>Login</c> event fires early. Unlock bitmaps, the achievement list, and inventory all
+    /// stream in over the following seconds, so collecting immediately would read a half-populated
+    /// world and report far less than the character owns. That would not be <i>wrong</i> — absence
+    /// never clears anything server-side — but it would waste an upload and delay the real one by a
+    /// full interval. Waiting costs nothing.
+    /// </remarks>
+    private static readonly TimeSpan LoginSettleDelay = TimeSpan.FromSeconds(10);
+
+    /// <summary>How long to wait before re-reading a character whose details were not usable yet.</summary>
+    private static readonly TimeSpan IdentityRetryDelay = TimeSpan.FromSeconds(5);
+
+    /// <summary>How many times to re-read an unusable character before giving up until next login.</summary>
+    private const int MaxIdentityAttempts = 12;
+
+    private readonly IFramework framework;
+    private readonly IClientState clientState;
+    private readonly IPlayerState playerState;
+    private readonly IUnlockState unlockState;
+    private readonly IPluginLog log;
+    private readonly ApiClient apiClient;
+    private readonly PluginSettings settings;
+    private readonly IReadOnlyList<ICollector> collectors;
+    private readonly string pluginVersion;
+
+    /// <summary>The source of "now". Injected so the schedule never depends on the wall clock in tests.</summary>
+    private readonly TimeProvider timeProvider;
+
+    private readonly SyncScheduler scheduler = new();
+
+    /// <summary>
+    /// Cancelled on unload, so an upload in flight when the plugin is torn down stops rather than
+    /// completing against disposed state.
+    /// </summary>
+    private readonly CancellationTokenSource lifetime = new();
+
+    /// <summary>
+    /// A copy of <see cref="lifetime"/>'s token, taken before it can ever be disposed.
+    /// </summary>
+    /// <remarks>
+    /// Reading <c>lifetime.Token</c> after the source is disposed throws. Background work started
+    /// before <see cref="Dispose"/> may still be running when that happens, so the token is captured
+    /// once here. A token whose source was cancelled and then disposed is still safe to observe.
+    /// </remarks>
+    private readonly CancellationToken lifetimeToken;
+
+    // `volatile` on the next four fields is not decoration. Each is written on one thread and read on
+    // another (the background task writes, the framework or UI thread reads, or vice versa). Without
+    // it the compiler or CPU may keep a stale copy in a register and never observe the update.
+
+    /// <summary>The most recent <c>/config</c>, or null until the first poll succeeds.</summary>
+    private volatile ConfigResponse? remoteConfig;
+
+    /// <summary>True while an upload is in flight, so the framework thread never starts a second one.</summary>
+    private volatile bool uploadInFlight;
+
+    /// <summary>True while a <c>/config</c> poll is in flight.</summary>
+    private volatile bool configPollInFlight;
+
+    /// <summary>
+    /// Set when the server reported a failure only the user can fix. Suppresses all further work
+    /// until the user intervenes, rather than looping against a server that will keep refusing.
+    /// </summary>
+    private volatile bool blockedPendingUserAction;
+
+    /// <summary>
+    /// The last outcome as an <see cref="ApiStatus"/> cast to int, or -1 when nothing has completed.
+    /// </summary>
+    /// <remarks>
+    /// An int rather than an <c>ApiStatus?</c> because <c>volatile</c> cannot be applied to a
+    /// nullable enum. Written by the background task, read by the UI thread.
+    /// </remarks>
+    private volatile int lastStatusCode = -1;
+
+    // The next three are touched ONLY on the framework thread — from the Update handler and from the
+    // Login/Logout/Unlock events, which Dalamud raises on that same thread. They therefore need no
+    // synchronization. Moving any of them to a background thread would change that.
+
+    /// <summary>The character to attribute uploads to. Null whenever nobody is logged in.</summary>
+    private CharacterIdentity? identity;
+
+    /// <summary>When the login settle delay expires, or null when not waiting for one.</summary>
+    private DateTimeOffset? loginSettledAt;
+
+    /// <summary>How many times the character has been read but found unusable since the last login.</summary>
+    private int identityAttempts;
+
+    /// <summary>When the next <c>/config</c> poll is due. Null means "poll at the first opportunity".</summary>
+    private DateTimeOffset? nextConfigPollAt;
+
+    /// <summary>Wires the manager to the game. Subscribes only; uploads nothing.</summary>
+    public SyncManager(
+        IFramework framework,
+        IClientState clientState,
+        IPlayerState playerState,
+        IUnlockState unlockState,
+        IPluginLog log,
+        ApiClient apiClient,
+        PluginSettings settings,
+        IReadOnlyList<ICollector> collectors,
+        string pluginVersion,
+        TimeProvider? timeProvider = null)
+    {
+        this.framework = framework;
+        this.clientState = clientState;
+        this.playerState = playerState;
+        this.unlockState = unlockState;
+        this.log = log;
+        this.apiClient = apiClient;
+        this.settings = settings;
+        this.collectors = collectors;
+        this.pluginVersion = pluginVersion;
+        this.timeProvider = timeProvider ?? TimeProvider.System;
+
+        lifetimeToken = lifetime.Token;
+
+        // Every `+=` here has a matching `-=` in Dispose. A handler left attached after unload would
+        // be invoked against a torn-down plugin.
+        framework.Update += OnFrameworkUpdate;
+        clientState.Login += OnLogin;
+        clientState.Logout += OnLogout;
+        unlockState.Unlock += OnUnlock;
+
+        // A plugin enabled while already logged in never receives a Login event, so treat that as one.
+        if (clientState.IsLoggedIn)
+            OnLogin();
+    }
+
+    /// <summary>The last upload's outcome, or null if none has completed. For the settings window.</summary>
+    public ApiStatus? LastStatus => lastStatusCode < 0 ? null : (ApiStatus)lastStatusCode;
+
+    /// <summary>True when syncing is halted until the user fixes something (bad token, unclaimed character).</summary>
+    public bool BlockedPendingUserAction => blockedPendingUserAction;
+
+    /// <summary>The most recent server config, for the settings window to render category switches from.</summary>
+    public ConfigResponse? RemoteConfig => remoteConfig;
+
+    /// <summary>Queues an immediate full sweep, as when the user presses "Sync now".</summary>
+    /// <remarks>
+    /// Clears the "needs user action" halt: pressing the button is the user asserting they fixed it.
+    /// It still respects any backoff — a button must not become a way to hammer a server that said stop.
+    /// </remarks>
+    public void RequestManualSync()
+    {
+        var now = timeProvider.GetUtcNow();
+
+        blockedPendingUserAction = false;
+
+        // Identity capture can give up (a home world that never resolved), and only a fresh login
+        // re-arms it. Without this, "Sync now" would queue a sweep that the `identity is null` guard
+        // silently drops on every frame, and the button would appear to do nothing at all.
+        if (identity is null && clientState.IsLoggedIn)
+        {
+            loginSettledAt = now;
+            identityAttempts = 0;
+        }
+
+        scheduler.Request(SyncTrigger.Manual, now);
+    }
+
+    /// <summary>Unsubscribes everything the constructor subscribed to, then cancels work in flight.</summary>
+    public void Dispose()
+    {
+        framework.Update -= OnFrameworkUpdate;
+        clientState.Login -= OnLogin;
+        clientState.Logout -= OnLogout;
+        unlockState.Unlock -= OnUnlock;
+
+        // Unsubscribe first, then cancel: no new work can start once the handlers are detached.
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+
+    // --- Game events -----------------------------------------------------------------------
+
+    /// <summary>
+    /// The character began loading. The identity is deliberately not read yet — at this moment the
+    /// game has not necessarily populated it.
+    /// </summary>
+    private void OnLogin()
+    {
+        loginSettledAt = timeProvider.GetUtcNow() + LoginSettleDelay;
+        identityAttempts = 0;
+    }
+
+    /// <summary>The character logged out. Everything character-specific is dropped.</summary>
+    /// <remarks>
+    /// Dalamud hands this a logout type and code that the plugin has no use for; the signature must
+    /// still match the event's delegate.
+    /// </remarks>
+    private void OnLogout(int type, int code)
+    {
+        identity = null;
+        loginSettledAt = null;
+        identityAttempts = 0;
+
+        // Queued work belongs to the character that queued it. Uploading it after a character switch
+        // would attribute one character's unlocks to another.
+        scheduler.Reset();
+    }
+
+    /// <summary>
+    /// The local player unlocked something. Routes it to the collector that owns that sheet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Contains no category names. It asks each collector "is this row yours?" and files the answer
+    /// under that collector's own key, so a new collection needs no change here.
+    /// </para>
+    /// <para>
+    /// Routing rather than sweeping is a correctness requirement, not an optimization. The contract
+    /// says an <c>unlock</c> upload "stamps the upload moment as the acquisition time for every
+    /// category in it", and an acquisition date is never revised afterwards. Quests are the sharpest
+    /// case: a snapshot upload deliberately leaves their date null, so sweeping every category on one
+    /// mount unlock would stamp a fake acquisition date onto every quest uploaded for the first time
+    /// alongside it — permanently.
+    /// </para>
+    /// <para>
+    /// The <c>identity is null</c> guard is load-bearing for compliance, not just for correctness: it
+    /// is what keeps this handler completely inert before the user has opted in, since the identity
+    /// is only ever captured on the far side of the upload gate.
+    /// </para>
+    /// </remarks>
+    private void OnUnlock(RowRef rowRef)
+    {
+        if (identity is null)
+            return;
+
+        var now = timeProvider.GetUtcNow();
+
+        foreach (var collector in collectors)
+        {
+            // Not every collector maps to an unlockable sheet — possession counts, for instance, are
+            // not unlocks. Those simply do not implement IUnlockAware and never match.
+            //
+            // `is IUnlockAware aware` tests the type and binds the converted value in one step.
+            if (collector is IUnlockAware aware && aware.Handles(rowRef))
+            {
+                scheduler.NotifyUnlock(collector.CategoryKey, now);
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs every frame on the framework thread. Must stay cheap: this is the game's render loop.
+    /// </summary>
+    private void OnFrameworkUpdate(IFramework _)
+    {
+        // Consent and a credential, before anything else happens. This is the check that keeps the
+        // plugin silent — no network, no game reads — on a fresh install.
+        if (!UploadGate.CanContactServer(settings))
+            return;
+
+        if (blockedPendingUserAction)
+            return;
+
+        var now = timeProvider.GetUtcNow();
+
+        // Read the volatile field ONCE and use the snapshot for the whole frame. A background poll
+        // completing mid-frame would otherwise let us collect items against one manifest and stamp
+        // the payload with a different manifest's version.
+        var config = remoteConfig;
+
+        // Polled even while the kill switch is off — it is how we learn the switch flipped back.
+        PollConfigIfDue(now);
+
+        CaptureIdentityIfSettled(now);
+
+        if (identity is null || uploadInFlight)
+            return;
+
+        // The server's global kill switch, honored locally to save a round trip that would only 503.
+        if (!UploadGate.CanUpload(settings, config))
+            return;
+
+        var due = scheduler.Poll(now);
+        if (due is null)
+            return;
+
+        StartUpload(due, config);
+    }
+
+    // --- Work ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Reads the character once the login has settled. On the framework thread, as required.
+    /// </summary>
+    /// <remarks>
+    /// The character is committed only when it is <b>usable</b>. An empty name or home world would
+    /// fail the contract's length constraints and earn a 400 on every single upload for the rest of
+    /// the session — a silent, permanent failure. So an unusable read is retried a bounded number of
+    /// times and then abandoned until the next login, rather than cached.
+    /// </remarks>
+    private void CaptureIdentityIfSettled(DateTimeOffset now)
+    {
+        // `x is not { } y` reads as "x is null". The positive form, `x is { } y`, means "x is not
+        // null, and call the unwrapped value y" — a null test and an unwrap in one step, after which
+        // the compiler knows y is non-null. So: bail out if no login is pending, or if it has not
+        // settled yet.
+        if (loginSettledAt is not { } settledAt || now < settledAt)
+            return;
+
+        // The delay elapsed but the game has not populated the player yet. Re-check next frame; this
+        // costs two property reads and never logs, so it is safe to do per-frame.
+        if (!playerState.IsLoaded || playerState.ContentId == 0)
+            return;
+
+        CharacterIdentity candidate;
+        try
+        {
+            // The one-way door. The raw ContentId is hashed here, at the edge, and the plain value
+            // never reaches the payload, the log, or the config file.
+            candidate = new CharacterIdentity
+            {
+                ContentIdHash = ContentIdHash.Compute(playerState.ContentId),
+                Name = playerState.CharacterName,
+
+                // The home world is a lazy reference into a game data sheet. It can fail to resolve
+                // — a sheet still loading, or a world newer than the installed game data.
+                HomeWorld = playerState.HomeWorld.ValueNullable?.Name.ExtractText() ?? string.Empty,
+            };
+        }
+        catch (Exception ex)
+        {
+            // A character we cannot identify is a character we must not upload for: the hash is what
+            // the server binds the data to, and guessing it would write to the wrong character.
+            log.Error(ex, "Could not read the local character; syncing stays idle until next login.");
+            loginSettledAt = null;
+            return;
+        }
+
+        // Never cache an identity the server would reject. See CharacterIdentity.IsUsable.
+        if (!CharacterIdentity.IsUsable(candidate.Name, candidate.HomeWorld))
+        {
+            if (++identityAttempts >= MaxIdentityAttempts)
+            {
+                log.Warning(
+                    "The local character's name or home world never became readable; " +
+                    "syncing stays idle until next login.");
+                loginSettledAt = null;
+                return;
+            }
+
+            // Back off and try again, rather than committing an identity every upload will fail on.
+            loginSettledAt = now + IdentityRetryDelay;
+            return;
+        }
+
+        loginSettledAt = null;
+        identityAttempts = 0;
+        identity = candidate;
+
+        log.Debug("Character loaded; queuing a login sync.");
+        scheduler.Request(SyncTrigger.Login, now);
+    }
+
+    /// <summary>Collects on the framework thread, then hands the payload to a background upload.</summary>
+    /// <param name="due">The work the scheduler handed out. Already consumed — it will not be reissued.</param>
+    /// <param name="config">The frame's snapshot of the server config, so it cannot change mid-build.</param>
+    private void StartUpload(SyncDue due, ConfigResponse? config)
+    {
+        CollectionSnapshot snapshot;
+        SyncRequest request;
+
+        // The scheduler has already handed this work out, so a throw here would silently lose the
+        // sweep. Worse, an exception escaping the Update handler propagates into Dalamud's dispatch.
+        // Individual collectors are guarded inside CollectorRunner; this guards everything around them.
+        try
+        {
+            // Reading game state — must happen here, on the framework thread, before anything is async.
+            snapshot = CollectorRunner.Run(
+                CollectorSelection.For(collectors, due.Categories), settings, config);
+
+            LogCollectionCost(snapshot, due.Trigger);
+
+            if (snapshot.Collections.Count == 0)
+            {
+                // Every category was disabled, skipped, or unreadable. An empty `collections` object
+                // is a valid payload, but it asserts nothing, so sending it would only spend a
+                // rate-limit slot.
+                log.Debug($"Nothing to upload for {due.Trigger}; skipping.");
+                return;
+            }
+
+            request = SyncPayloadBuilder.Build(
+                identity!, pluginVersion, due.Trigger, snapshot, config?.ManifestVersion);
+        }
+        catch (Exception ex)
+        {
+            log.Error(ex, $"Could not assemble the {due.Trigger} upload; skipping it.");
+            return;
+        }
+
+        uploadInFlight = true;
+
+        // Task.Run moves the whole thing off the framework thread, including the JSON serialization
+        // inside PostSyncAsync. `_ =` discards the task deliberately: it is awaited by nobody, and
+        // UploadAsync is written so that nothing can escape it.
+        //
+        // No cancellation token is passed to Task.Run on purpose. Handing it one that is ALREADY
+        // cancelled makes Task.Run skip the delegate entirely — so UploadAsync's `finally` would
+        // never run, `uploadInFlight` would stay true, and syncing would be dead for the rest of the
+        // session. Cancellation is instead observed inside UploadAsync, where the flag is cleared.
+        _ = Task.Run(() => UploadAsync(request, due.Trigger));
+    }
+
+    /// <summary>
+    /// Reports what this collection pass cost the frame it ran in.
+    /// </summary>
+    /// <remarks>
+    /// Escalates to Warning past the budget threshold because at that point it is no longer a
+    /// curiosity: a pass that overruns the frame is a visible stutter for the player, and the fix is
+    /// to spread the work across frames rather than to collect less. The arithmetic and the ordering
+    /// live in <see cref="CollectionCost"/>, where they are unit-tested; only the logging is here.
+    /// </remarks>
+    private void LogCollectionCost(CollectionSnapshot snapshot, SyncTrigger trigger)
+    {
+        var cost = CollectionCost.From(snapshot);
+        if (cost.IsEmpty)
+            return;
+
+        // C# interpolation is eager: these strings are assembled whether or not the log level would
+        // print them. Affordable only because this runs once per upload (a login or a 30-minute
+        // sweep), never once per frame. Do not copy this pattern into a per-frame path.
+        if (cost.OverBudget)
+        {
+            log.Warning(
+                $"A {trigger} collection pass took {cost.Total.TotalMilliseconds:F1}ms on the " +
+                $"framework thread, over the " +
+                $"{CollectionCost.FrameBudgetWarningThreshold.TotalMilliseconds:F0}ms budget: " +
+                $"{cost.Breakdown}. This may stutter the game.");
+            return;
+        }
+
+        log.Debug($"{trigger} collection took {cost.Total.TotalMilliseconds:F1}ms: {cost.Breakdown}");
+    }
+
+    /// <summary>Uploads off the framework thread, retrying once if the failure was transient.</summary>
+    private async Task UploadAsync(SyncRequest request, SyncTrigger trigger)
+    {
+        try
+        {
+            for (var attempt = 0; ; attempt++)
+            {
+                var response = await apiClient.PostSyncAsync(request, lifetimeToken).ConfigureAwait(false);
+
+                if (HandleResponse(response, trigger))
+                    return;
+
+                if (!RetryPolicy.ShouldRetryNow(response.Status, attempt))
+                    return;
+
+                // Writes are idempotent server-side, so repeating the identical body is safe.
+                log.Debug($"Retrying {trigger} sync after {response.Status}.");
+                await Task.Delay(RetryPolicy.TransientRetryDelay, lifetimeToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The plugin unloaded mid-upload. Deliberately not logged: the log service may itself be
+            // torn down by now.
+        }
+        catch (Exception ex)
+        {
+            // A last-resort net. An exception left unhandled in a discarded task escapes as an
+            // unobserved-task exception on the finalizer thread, long after the context that caused
+            // it is gone — logged at best, silently swallowed at worst. Catch it while we still know
+            // what we were doing.
+            log.Error(ex, "Unexpected failure during sync upload.");
+        }
+        finally
+        {
+            uploadInFlight = false;
+        }
+    }
+
+    /// <summary>Applies the server's answer to the scheduler. Returns true when the attempt is settled.</summary>
+    private bool HandleResponse(ApiResponse<SyncResponse> response, SyncTrigger trigger)
+    {
+        lastStatusCode = (int)response.Status;
+        var now = timeProvider.GetUtcNow();
+
+        if (response.Status == ApiStatus.Ok)
+        {
+            scheduler.MarkUploaded(trigger, now);
+
+            // Categories the server refused (a per-category kill switch). Surfaced so the user is not
+            // left wondering why a collection never appears on the website.
+            var skipped = response.Value?.SkippedCategories;
+            if (skipped is {Count: > 0})
+                log.Information($"Server skipped: {string.Join(", ", skipped)}");
+
+            return true;
+        }
+
+        // The server told us to wait. Never argue: honor Retry-After when it sent one.
+        if (RetryPolicy.BackoffUntil(response.Status, response.RetryAfter, now) is { } until)
+        {
+            log.Information($"Backing off until {until:u} after {response.Status}.");
+            scheduler.BackOffUntil(until);
+            return true;
+        }
+
+        // Nothing a retry can fix — a bad token, an unclaimed character, a misconfigured backend.
+        if (RetryPolicy.RequiresUserAction(response.Status))
+        {
+            blockedPendingUserAction = true;
+            log.Warning($"Sync halted: {response.Status}. The user must resolve this.");
+            return true;
+        }
+
+        // Terminal but not the user's fault (a 400, 405, or 413 — all plugin bugs). Retrying the
+        // identical body cannot help, so drop it and let the next trigger build a fresh one.
+        if (ApiStatusMap.IsTerminal(response.Status))
+        {
+            log.Error($"Sync rejected: {response.Status}. Dropping this upload.");
+            return true;
+        }
+
+        // Transient. The caller decides whether an attempt remains.
+        log.Warning($"Sync failed: {response.Status}.");
+        return false;
+    }
+
+    /// <summary>Fetches <c>/config</c> when it is due, adopting the server's cadence and manifest.</summary>
+    private void PollConfigIfDue(DateTimeOffset now)
+    {
+        if (configPollInFlight)
+            return;
+
+        if (nextConfigPollAt is { } dueAt && now < dueAt)
+            return;
+
+        nextConfigPollAt = now + ConfigPollInterval;
+        configPollInFlight = true;
+
+        // Untokened for the same reason as the upload above: an already-cancelled token would make
+        // Task.Run skip the delegate, stranding configPollInFlight at true.
+        _ = Task.Run(PollConfigAsync);
+    }
+
+    private async Task PollConfigAsync()
+    {
+        try
+        {
+            var response = await apiClient.GetConfigAsync(lifetimeToken).ConfigureAwait(false);
+
+            if (response.IsSuccess)
+            {
+                remoteConfig = response.Value;
+                scheduler.ApplyIntervals(response.Value!.Intervals);
+                return;
+            }
+
+            if (RetryPolicy.RequiresUserAction(response.Status))
+            {
+                blockedPendingUserAction = true;
+                log.Warning($"Config poll halted: {response.Status}. The user must resolve this.");
+            }
+
+            // Any other failure keeps the previous config, which is exactly right: a config we cannot
+            // refresh is better than no config, and the next poll is only an interval away.
+        }
+        catch (OperationCanceledException)
+        {
+            // Unloaded mid-poll.
+        }
+        catch (Exception ex)
+        {
+            log.Error(ex, "Unexpected failure polling config.");
+        }
+        finally
+        {
+            configPollInFlight = false;
+        }
+    }
+}

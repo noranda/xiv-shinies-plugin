@@ -47,16 +47,21 @@ public sealed unsafe class ItemCollector : ICollector
     private IReadOnlyDictionary<uint, uint>? armoireIndex;
 
     /// <summary>Creates the collector.</summary>
+    /// <param name="categoryKey">
+    /// The key this collector files its facts under. Passed in from the registry rather than
+    /// hardcoded here, so that every category key in the plugin is chosen in exactly one file.
+    /// </param>
     /// <param name="dataManager">Dalamud's game data accessor, used to read the armoire sheet.</param>
     /// <param name="framework">Used to verify we are on the framework thread before reading.</param>
-    public ItemCollector(IDataManager dataManager, IFramework framework)
+    public ItemCollector(string categoryKey, IDataManager dataManager, IFramework framework)
     {
+        CategoryKey = categoryKey;
         this.dataManager = dataManager;
         this.framework = framework;
     }
 
     /// <inheritdoc/>
-    public string CategoryKey => CategoryKeys.Items;
+    public string CategoryKey { get; }
 
     /// <inheritdoc/>
     public CollectResult Collect(CollectContext context)

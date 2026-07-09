@@ -14,6 +14,8 @@ using Dalamud.Plugin.Services;
 using XIVShinies.SyncPlugin.Api;
 // The registered fact sources.
 using XIVShinies.SyncPlugin.Collectors;
+// The upload orchestrator and its supporting policy classes.
+using XIVShinies.SyncPlugin.Sync;
 // Our own window classes.
 using XIVShinies.SyncPlugin.Windows;
 
@@ -61,6 +63,15 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
 
+    /// <summary>Login and logout events for the local session.</summary>
+    [PluginService] internal static IClientState ClientState { get; private set; } = null!;
+
+    /// <summary>
+    /// The <b>local</b> character's identity — content id, name, home world. Dalamud's rules forbid
+    /// collecting identifiers for any other player, and this service exposes no way to.
+    /// </summary>
+    [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
+
     // --- Plugin state --------------------------------------------------------------------
 
     /// <summary>The persisted settings object (see Configuration.cs).</summary>
@@ -82,6 +93,10 @@ public sealed class Plugin : IDalamudPlugin
     // unmanaged resources, so there is nothing to dispose.
     private readonly IReadOnlyList<ICollector> collectors;
 
+    // Listens for login/unlock/interval and drives the uploads. Subscribes to game events, so it
+    // must be disposed — and disposed BEFORE the ApiClient it borrows.
+    private readonly SyncManager syncManager;
+
     /// <summary>
     /// Constructor — Dalamud calls this once on load. Wire everything up here, and be sure to
     /// tear down in Dispose whatever you set up here (handlers, events, windows).
@@ -101,6 +116,13 @@ public sealed class Plugin : IDalamudPlugin
 
         // Build the fact sources. Nothing reads the game until something explicitly runs them.
         collectors = CollectorRegistry.Create(DataManager, UnlockState, Framework);
+
+        // Start listening. The manager subscribes to login and unlock events immediately, but every
+        // path out of them checks the upload gate first, so a user who has not opted in sends
+        // nothing and the plugin never contacts the server.
+        syncManager = new SyncManager(
+            Framework, ClientState, PlayerState, UnlockState, Log,
+            apiClient, Configuration.Settings, collectors, version);
 
         // Create our window and hand it to the WindowSystem so it gets drawn each frame.
         mainWindow = new MainWindow();
@@ -147,6 +169,10 @@ public sealed class Plugin : IDalamudPlugin
 
         windowSystem.RemoveAllWindows();
         mainWindow.Dispose();
+
+        // Before the ApiClient, deliberately: this unsubscribes the game events and cancels any
+        // upload in flight, so nothing is still reaching for the client when it goes away.
+        syncManager.Dispose();
 
         // Releases the underlying HttpClient and its connection pool.
         apiClient.Dispose();

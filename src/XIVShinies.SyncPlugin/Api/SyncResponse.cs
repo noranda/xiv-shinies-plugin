@@ -44,6 +44,12 @@ public sealed record SyncResponse
 /// Rows created plus promoted per category. Note <c>items</c> never appears here — item
 /// possession feeds relic proofs rather than a collection count.
 /// </summary>
+/// <remarks>
+/// These named properties mirror the server's response shape and exist only to deserialize it. They
+/// are informational: <b>no plugin logic may branch on them.</b> Reading one would reintroduce the
+/// category-name dependency that the rest of the plugin is built to avoid, and would quietly break
+/// the rule that adding a collection is one new collector class and nothing else.
+/// </remarks>
 public sealed record WrittenCounts
 {
     /// <summary>Achievement rows written.</summary>

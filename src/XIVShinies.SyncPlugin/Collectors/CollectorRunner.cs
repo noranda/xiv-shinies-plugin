@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text.Json.Nodes;
 using XIVShinies.SyncPlugin.Api;
 
@@ -21,6 +22,27 @@ public sealed record CollectionSnapshot
     /// hints (for example "open your Achievements window once"); nothing else interprets them.
     /// </summary>
     public required IReadOnlyDictionary<string, string> Skipped { get; init; }
+
+    /// <summary>
+    /// How long each collector took, keyed by category. Only collectors that actually ran appear.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Collection happens on the game's framework thread, which has roughly 16ms to produce a frame.
+    /// Every collector spends part of that budget, and the plugin is expected to grow more of them —
+    /// so the cost has to be <b>visible</b>, not assumed. The orchestrator logs these, which means a
+    /// contributor who adds an expensive collector sees its price in <c>/xllog</c> on the first sweep
+    /// rather than discovering it as a stutter report.
+    /// </para>
+    /// <para>
+    /// Measured here rather than logged here on purpose: this class holds no Dalamud services, which
+    /// is what keeps it unit-testable. It reports the numbers; the caller decides what to do with them.
+    /// </para>
+    /// </remarks>
+    // Not `required`: a snapshot assembled in a test need not care about timings, and an empty
+    // dictionary is the honest default for "nothing was measured".
+    public IReadOnlyDictionary<string, TimeSpan> Durations { get; init; } =
+        new Dictionary<string, TimeSpan>();
 }
 
 /// <summary>
@@ -45,6 +67,7 @@ public static class CollectorRunner
     {
         var collections = new Dictionary<string, JsonNode>();
         var skipped = new Dictionary<string, string>();
+        var durations = new Dictionary<string, TimeSpan>();
 
         // Built once and shared: every collector sees the same view of the world for this pass.
         var context = new CollectContext { RemoteConfig = remoteConfig };
@@ -59,6 +82,10 @@ public static class CollectorRunner
                 skipped[key] = CollectSkipReasons.Disabled;
                 continue;
             }
+
+            // A raw timestamp rather than a Stopwatch object: no allocation, and this runs inside the
+            // game's per-frame loop. `Stopwatch.GetElapsedTime` converts the pair into a TimeSpan.
+            var startedAt = Stopwatch.GetTimestamp();
 
             CollectResult result;
             try
@@ -76,9 +103,14 @@ public static class CollectorRunner
             // framework-thread check inside those collectors, not this try/catch.
             catch (Exception)
             {
+                // Timed even on the failure path: a collector that is slow *and* throws is exactly
+                // the one worth seeing in the log.
+                durations[key] = Stopwatch.GetElapsedTime(startedAt);
                 skipped[key] = CollectSkipReasons.CollectorError;
                 continue;
             }
+
+            durations[key] = Stopwatch.GetElapsedTime(startedAt);
 
             if (result.WasCollected)
             {
@@ -92,6 +124,11 @@ public static class CollectorRunner
             }
         }
 
-        return new CollectionSnapshot { Collections = collections, Skipped = skipped };
+        return new CollectionSnapshot
+        {
+            Collections = collections,
+            Skipped = skipped,
+            Durations = durations,
+        };
     }
 }
