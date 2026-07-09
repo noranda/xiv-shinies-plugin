@@ -19,6 +19,11 @@ public static class ApiJson
         // CharacterContentIdHash -> characterContentIdHash automatically, both ways.
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 
+        // Dictionary KEYS are not property names, so the policy above does not touch them. Our
+        // category keys are already lowercase ("quests"), making this a no-op today — it is set so
+        // a future key written in PascalCase cannot silently reach the wire in the wrong case.
+        DictionaryKeyPolicy = JsonNamingPolicy.CamelCase,
+
         // THE monotonic-write rule, enforced at the serializer: a null property is left out of
         // the JSON entirely rather than written as `null`. That is what lets an unread category
         // be *absent* ("not read this time") instead of an empty array ("read, and it was empty").

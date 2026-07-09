@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace XIVShinies.SyncPlugin.Api;
 
@@ -50,32 +52,46 @@ public sealed record SyncRequest
     /// <summary>What prompted this upload.</summary>
     public required SyncTrigger Trigger { get; init; }
 
-    /// <summary>The facts being uploaded. Every category inside is optional.</summary>
-    public required SyncCollections Collections { get; init; }
+    /// <summary>
+    /// The facts being uploaded, keyed by category (<c>"quests"</c>, <c>"items"</c>, …).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A dictionary rather than one named property per category, on purpose. A collector announces
+    /// its own <c>CategoryKey</c> and contributes its facts under it, so adding a new collection is
+    /// one new collector class — nothing here changes. Naming the categories in this type would
+    /// force every caller that places a result to branch on the category name, which is exactly
+    /// what the extensibility contract forbids.
+    /// </para>
+    /// <para>
+    /// <b>A category that could not be read must simply be absent from this dictionary</b>, never
+    /// present with an empty array. Absence means "not read this time"; an empty array means "read,
+    /// and it was empty". That distinction is the monotonic-write rule.
+    /// </para>
+    /// <para>
+    /// The values are <see cref="JsonNode"/> rather than <c>object</c> because the shapes differ
+    /// per category — id-lists are arrays of numbers, <c>items</c> is an array of objects — and a
+    /// JsonNode serializes exactly as built, with no polymorphism surprises.
+    /// </para>
+    /// </remarks>
+    public required Dictionary<string, JsonNode> Collections { get; init; }
 }
 
 /// <summary>
-/// The per-category facts. Every property is nullable on purpose: <b>null means "not read this
-/// time"</b> and is omitted from the JSON, whereas an empty array means "read, and it was empty".
-/// The server treats both as carrying no facts, but only absence is safe when a category could
-/// not be read (for example, the achievements list was never opened).
+/// Builds the <see cref="JsonNode"/> values that collectors place into
+/// <see cref="SyncRequest.Collections"/>.
 /// </summary>
-public sealed record SyncCollections
+public static class SyncFacts
 {
-    /// <summary>Unlocked achievement IDs.</summary>
-    public IReadOnlyList<uint>? Achievements { get; init; }
+    /// <summary>Facts for a category that is a plain list of unlocked/completed IDs.</summary>
+    // SerializeToNode turns a value into an in-memory JSON tree rather than a string, so it can be
+    // dropped into a larger document and serialized once, later.
+    public static JsonNode Ids(IReadOnlyList<uint> ids) =>
+        JsonSerializer.SerializeToNode(ids, ApiJson.Options)!;
 
-    /// <summary>Unlocked minion IDs.</summary>
-    public IReadOnlyList<uint>? Minions { get; init; }
-
-    /// <summary>Unlocked mount IDs.</summary>
-    public IReadOnlyList<uint>? Mounts { get; init; }
-
-    /// <summary>Completed quest IDs (Excel row ids, which equal the server's quest ids).</summary>
-    public IReadOnlyList<uint>? Quests { get; init; }
-
-    /// <summary>Possession counts for the items the server asked about in its manifest.</summary>
-    public IReadOnlyList<ItemPossession>? Items { get; init; }
+    /// <summary>Facts for the <c>items</c> category, which carries objects rather than IDs.</summary>
+    public static JsonNode Items(IReadOnlyList<ItemPossession> items) =>
+        JsonSerializer.SerializeToNode(items, ApiJson.Options)!;
 }
 
 /// <summary>How many of a manifest item the character possesses.</summary>

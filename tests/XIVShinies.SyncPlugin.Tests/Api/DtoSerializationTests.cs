@@ -23,7 +23,7 @@ public class DtoSerializationTests
         HomeWorld = "Excalibur",
         PluginVersion = "1.0.0",
         Trigger = SyncTrigger.Login,
-        Collections = new SyncCollections(),
+        Collections = new Dictionary<string, JsonNode>(),
     };
 
     [Fact]
@@ -67,7 +67,10 @@ public class DtoSerializationTests
     {
         var request = MinimalRequest() with
         {
-            Collections = new SyncCollections { Quests = new uint[] { 65575, 66216 } },
+            Collections = new Dictionary<string, JsonNode>
+            {
+                ["quests"] = SyncFacts.Ids(new uint[] { 65575, 66216 }),
+            },
         };
 
         var collections = Serialize(request)["collections"]!.AsObject();
@@ -84,7 +87,10 @@ public class DtoSerializationTests
     {
         var request = MinimalRequest() with
         {
-            Collections = new SyncCollections { Mounts = new uint[0] },
+            Collections = new Dictionary<string, JsonNode>
+            {
+                ["mounts"] = SyncFacts.Ids(new uint[0]),
+            },
         };
 
         var collections = Serialize(request)["collections"]!.AsObject();
@@ -98,9 +104,10 @@ public class DtoSerializationTests
     {
         var request = MinimalRequest() with
         {
-            Collections = new SyncCollections
+            Collections = new Dictionary<string, JsonNode>
             {
-                Items = new[] { new ItemPossession { Id = 7851, Count = 1, Fresh = true } },
+                ["items"] = SyncFacts.Items(
+                    new[] { new ItemPossession { Id = 7851, Count = 1, Fresh = true } }),
             },
         };
 
@@ -111,6 +118,25 @@ public class DtoSerializationTests
         Assert.True(item["fresh"]!.GetValue<bool>());
     }
 
+    // A category the plugin knows nothing about today must ride the wire untouched. The server
+    // strips keys it does not recognize, which is what lets both sides ship independently.
+    [Fact]
+    public void An_unknown_category_key_serializes_without_any_special_handling()
+    {
+        var request = MinimalRequest() with
+        {
+            Collections = new Dictionary<string, JsonNode>
+            {
+                ["facewear"] = SyncFacts.Ids(new uint[] { 42 }),
+            },
+        };
+
+        var collections = Serialize(request)["collections"]!.AsObject();
+
+        Assert.True(collections.ContainsKey("facewear"));
+        Assert.Equal(42u, collections["facewear"]!.AsArray()[0]!.GetValue<uint>());
+    }
+
     [Fact]
     public void SyncRequest_round_trips_through_json()
     {
@@ -118,7 +144,10 @@ public class DtoSerializationTests
         {
             ManifestVersion = "a1b2c3d4e5f6",
             Trigger = SyncTrigger.Interval,
-            Collections = new SyncCollections { Achievements = new uint[] { 1, 2 } },
+            Collections = new Dictionary<string, JsonNode>
+            {
+                ["achievements"] = SyncFacts.Ids(new uint[] { 1, 2 }),
+            },
         };
 
         var json = JsonSerializer.Serialize(original, ApiJson.Options);
@@ -127,8 +156,8 @@ public class DtoSerializationTests
         Assert.Equal(original.CharacterContentIdHash, back.CharacterContentIdHash);
         Assert.Equal(original.ManifestVersion, back.ManifestVersion);
         Assert.Equal(SyncTrigger.Interval, back.Trigger);
-        Assert.Equal(new uint[] { 1, 2 }, back.Collections.Achievements);
-        Assert.Null(back.Collections.Quests);
+        Assert.Equal(new uint[] { 1, 2 }, back.Collections["achievements"].AsArray().GetValues<uint>());
+        Assert.False(back.Collections.ContainsKey("quests"));
     }
 
     // The exact 200 body from the contract's GET /me example.
@@ -173,12 +202,30 @@ public class DtoSerializationTests
         var config = JsonSerializer.Deserialize<ConfigResponse>(body, ApiJson.Options)!;
 
         Assert.True(config.Enabled);
-        Assert.False(config.Categories.Minions);
-        Assert.True(config.Categories.Achievements);
+        Assert.False(config.IsCategoryEnabled("minions"));
+        Assert.True(config.IsCategoryEnabled("achievements"));
         Assert.Equal(30, config.Intervals.FullSyncMinutes);
         Assert.Equal(5, config.Intervals.UnlockDebounceSeconds);
         Assert.Equal(new uint[] { 7851, 7852 }, config.ItemManifest);
         Assert.Equal("a1b2c3d4e5f6", config.ManifestVersion);
+    }
+
+    // A switch the server has never heard of reads as enabled, so a new collector works before the
+    // server grows its toggle. The server strips payload keys it does not recognize.
+    [Fact]
+    public void An_unknown_category_switch_defaults_to_enabled()
+    {
+        const string body = """
+        {"categories": {"quests": true},
+         "enabled": true,
+         "intervals": {"fullSyncMinutes": 30, "unlockDebounceSeconds": 5},
+         "itemManifest": [], "manifestVersion": "abc"}
+        """;
+
+        var config = JsonSerializer.Deserialize<ConfigResponse>(body, ApiJson.Options)!;
+
+        Assert.True(config.IsCategoryEnabled("quests"));
+        Assert.True(config.IsCategoryEnabled("facewear")); // never mentioned by the server
     }
 
     // Optional keys are OMITTED rather than null, so the plugin can feature-detect them.

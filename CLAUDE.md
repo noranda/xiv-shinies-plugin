@@ -143,14 +143,16 @@ nit (sources: dalamud.dev `plugin-publishing/restrictions`, `plugin-development/
   hard requirement: SHA-256 the ContentId before it leaves the process, the raw ulong never
   travels and never lands in logs, config, or request bodies, and the digest stays
   deterministic across sessions (fixed byte representation).
-- **Network:** HTTPS only (the rule also requires the server's certificate be "issued from a
-  trusted certificate authority such as Let's Encrypt"); connect by **DNS hostname, never a
-  raw IP** (there is *no* loopback exemption — use `localhost`, not `127.0.0.1`); keep the
-  backend URL **user-overridable**; and send `User-Agent: XIVShinies.SyncPlugin/<version>`.
-  Base URL `https://xiv-shinies.com`.
-- **Explicit opt-in before any upload.** No silent first-run upload and no background polling
-  of the server without user action — uploads are user-chosen (onboarding consent) and
-  login/event/interval-driven, never a tight poll. Disclose exactly what is sent.
+- **Network (documented rules):** HTTPS only, with the server's certificate "issued from a
+  trusted certificate authority such as Let's Encrypt"; connect by **DNS hostname, never a raw
+  IP** (no loopback exemption is stated — use `localhost`, not `127.0.0.1`); minimize the data
+  sent; and keep the backend URL **user-overridable**. Base URL `https://xiv-shinies.com`.
+  *Our own convention, not a Dalamud rule:* send `User-Agent: XIVShinies.SyncPlugin/<version>`.
+- **Explicit opt-in before any upload.** Dalamud's documented rules are two distinct things:
+  never interact with the **game servers** without direct user action, and users must
+  **explicitly opt in** to non-essential data collection. Both apply here: no silent first-run
+  upload, and uploads are user-chosen (onboarding consent) and login/event/interval-driven,
+  never a tight poll. Disclose exactly what is sent.
 - **No plugin-usage fingerprinting.** Any analytics identifier must be pseudo-random or
   absent and user-resettable; send nothing that lets a third party detect plugin usage beyond
   what the user authorizes. (The auth token is a user-supplied credential, not analytics.)

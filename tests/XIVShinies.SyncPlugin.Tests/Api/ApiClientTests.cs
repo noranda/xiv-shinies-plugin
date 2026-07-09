@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
@@ -123,7 +125,10 @@ public class ApiClientTests
             HomeWorld = "Excalibur",
             PluginVersion = "1.2.3",
             Trigger = SyncTrigger.Manual,
-            Collections = new SyncCollections { Quests = new uint[] { 65575 } },
+            Collections = new Dictionary<string, JsonNode>
+            {
+                ["quests"] = SyncFacts.Ids(new uint[] { 65575 }),
+            },
         };
 
         var response = await client.PostSyncAsync(request);

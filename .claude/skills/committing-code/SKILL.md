@@ -33,6 +33,10 @@ digraph commit_flow {
 
 ### 1. Check Status and Read Every Change
 
+- **NEVER run `git add` / `git stage`.** The developer reviews the diff and stages the files
+  themselves; staging on their behalf destroys the unstaged view they are reading. Read git state,
+  never mutate it. If nothing is staged, say so and ask them to stage what they want committed —
+  do not stage it for them, and do not commit with `git commit -a`.
 - Run `git status` first to see staged vs unstaged changes — flag any unstaged changes to the user
 - Run `git diff --cached` to see all staged changes
 - Read the FULL diff — never truncate, summarize, or sample
@@ -98,6 +102,7 @@ If you catch yourself doing any of these, stop and correct:
 | Excuse                                         | Reality                                              |
 | ---------------------------------------------- | ---------------------------------------------------- |
 | "The change is small, no need for approval"    | Every commit needs approval. No exceptions.          |
+| "I'll just `git add -A` so I can show the diff" | Never stage. The developer stages; `git add` wipes the unstaged view they're reviewing. |
 | "I'll add the signature as convention"         | No signatures. AI use is disclosed once in AI-DECLARATION.md, not per commit. |
 | "A paragraph explains it better"               | Bullet list is required. Always.                     |
 | "The diff is too long to read fully"           | Read all of it. Break into sections if needed.       |

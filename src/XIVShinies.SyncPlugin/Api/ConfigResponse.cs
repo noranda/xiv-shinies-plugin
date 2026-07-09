@@ -9,8 +9,12 @@ namespace XIVShinies.SyncPlugin.Api;
 /// </summary>
 public sealed record ConfigResponse
 {
-    /// <summary>Per-category kill switches. False means "do not collect or send this".</summary>
-    public required ConfigCategories Categories { get; init; }
+    /// <summary>
+    /// Per-category kill switches keyed by category (<c>"quests"</c>, …). False means "do not
+    /// collect or send this". A dictionary rather than named properties, so a collector can look
+    /// up its own switch by its <c>CategoryKey</c> without anyone branching on category names.
+    /// </summary>
+    public required Dictionary<string, bool> Categories { get; init; }
 
     /// <summary>The global kill switch. False means stop uploading entirely.</summary>
     public required bool Enabled { get; init; }
@@ -26,25 +30,18 @@ public sealed record ConfigResponse
     /// unchanged the plugin can skip re-scanning the inventory.
     /// </summary>
     public required string ManifestVersion { get; init; }
-}
 
-/// <summary>Per-category kill switches (true = enabled).</summary>
-public sealed record ConfigCategories
-{
-    /// <summary>Whether achievement IDs may be collected and sent.</summary>
-    public required bool Achievements { get; init; }
-
-    /// <summary>Whether item possession counts may be collected and sent.</summary>
-    public required bool Items { get; init; }
-
-    /// <summary>Whether minion IDs may be collected and sent.</summary>
-    public required bool Minions { get; init; }
-
-    /// <summary>Whether mount IDs may be collected and sent.</summary>
-    public required bool Mounts { get; init; }
-
-    /// <summary>Whether completed quest IDs may be collected and sent.</summary>
-    public required bool Quests { get; init; }
+    /// <summary>
+    /// Whether the server permits this category right now.
+    /// </summary>
+    /// <remarks>
+    /// A category the server has never heard of reads as <b>enabled</b>. That lets a plugin ship a
+    /// new collector before the server grows the matching switch: the server strips payload keys it
+    /// does not recognize, so sending one costs a few bytes and breaks nothing. Defaulting to
+    /// disabled instead would silently withhold facts until both sides shipped in lockstep.
+    /// </remarks>
+    public bool IsCategoryEnabled(string categoryKey) =>
+        !Categories.TryGetValue(categoryKey, out var enabled) || enabled;
 }
 
 /// <summary>Server-chosen sync cadence.</summary>

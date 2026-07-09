@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 // Dalamud's command system (registering the /shinies slash command).
 using Dalamud.Game.Command;
 // The windowing system that draws and manages our ImGui windows.
@@ -11,6 +12,8 @@ using Dalamud.Plugin.Services;
 // Our HTTPS client and its DTOs. A child namespace is not visible automatically — only enclosing
 // namespaces are searched — so it needs an explicit using.
 using XIVShinies.SyncPlugin.Api;
+// The registered fact sources.
+using XIVShinies.SyncPlugin.Collectors;
 // Our own window classes.
 using XIVShinies.SyncPlugin.Windows;
 
@@ -43,6 +46,21 @@ public sealed class Plugin : IDalamudPlugin
     /// <summary>Writes to the Dalamud log (view in-game with <c>/xllog</c>).</summary>
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
 
+    /// <summary>Reads the game's static data sheets (quests, mounts, achievements, …).</summary>
+    [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
+
+    /// <summary>
+    /// Answers what the <b>local</b> player has unlocked or completed. It exposes only the local
+    /// player's state — there is no way to ask it about anyone else.
+    /// </summary>
+    [PluginService] internal static IUnlockState UnlockState { get; private set; } = null!;
+
+    /// <summary>
+    /// The game's per-frame loop. Used to prove a collector is on the framework thread before it
+    /// reads game memory, and to marshal work onto that thread.
+    /// </summary>
+    [PluginService] internal static IFramework Framework { get; private set; } = null!;
+
     // --- Plugin state --------------------------------------------------------------------
 
     /// <summary>The persisted settings object (see Configuration.cs).</summary>
@@ -60,6 +78,10 @@ public sealed class Plugin : IDalamudPlugin
     // disposed below.
     private readonly ApiClient apiClient;
 
+    // Every registered fact source. Constructed once; nothing runs them yet. They hold no
+    // unmanaged resources, so there is nothing to dispose.
+    private readonly IReadOnlyList<ICollector> collectors;
+
     /// <summary>
     /// Constructor — Dalamud calls this once on load. Wire everything up here, and be sure to
     /// tear down in Dispose whatever you set up here (handlers, events, windows).
@@ -76,6 +98,9 @@ public sealed class Plugin : IDalamudPlugin
         // build stamped in, which becomes the User-Agent and the payload's pluginVersion field.
         var version = PluginInterface.Manifest.AssemblyVersion?.ToString() ?? "0.0.0";
         apiClient = new ApiClient(Configuration.Settings, version);
+
+        // Build the fact sources. Nothing reads the game until something explicitly runs them.
+        collectors = CollectorRegistry.Create(DataManager, UnlockState, Framework);
 
         // Create our window and hand it to the WindowSystem so it gets drawn each frame.
         mainWindow = new MainWindow();
