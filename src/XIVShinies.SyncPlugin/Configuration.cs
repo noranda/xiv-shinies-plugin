@@ -6,9 +6,14 @@ using Dalamud.Configuration;
 namespace XIVShinies.SyncPlugin;
 
 /// <summary>
-/// The plugin's persisted settings. Dalamud serializes this object to a JSON file on disk and
-/// hands it back next launch, so anything stored here survives restarts.
+/// The object Dalamud serializes to disk and hands back on the next launch.
 /// </summary>
+/// <remarks>
+/// A deliberately thin shell. Implementing <c>IPluginConfiguration</c> ties this type to
+/// <c>Dalamud.dll</c>, which only exists inside the running game — so it cannot be constructed in
+/// a unit test. All the actual settings and their rules live in <see cref="PluginSettings"/>,
+/// which is Dalamud-free and therefore testable.
+/// </remarks>
 // `[Serializable]` is an "attribute" — metadata attached to a type, written in square brackets
 // above it. There's no direct React analog; think of it as a compile-time tag/decorator that
 // other code can read via reflection. Here it marks the class as safe to serialize to disk.
@@ -21,10 +26,12 @@ public class Configuration : IPluginConfiguration
 {
     // A C# "property" looks like a field but is really a get/set pair. `{ get; set; }` is an
     // "auto-property" — the compiler generates the backing storage for you. `= 0` sets the
-    // default. This is roughly `version: number = 0` on a class, but with built-in get/set.
-    // IPluginConfiguration requires this so Dalamud can migrate old saved configs across
-    // schema changes.
+    // default. IPluginConfiguration requires this so Dalamud can migrate old saved configs
+    // across schema changes.
     public int Version { get; set; } = 0;
+
+    /// <summary>Everything the user can configure. Persisted as a nested object.</summary>
+    public PluginSettings Settings { get; set; } = new();
 
     /// <summary>
     /// Convenience wrapper so callers can persist changes without reaching through the plugin

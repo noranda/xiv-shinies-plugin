@@ -8,6 +8,9 @@ using Dalamud.IoC;
 using Dalamud.Plugin;
 // The injectable Dalamud "services" live here (ICommandManager, IPluginLog, etc.).
 using Dalamud.Plugin.Services;
+// Our HTTPS client and its DTOs. A child namespace is not visible automatically — only enclosing
+// namespaces are searched — so it needs an explicit using.
+using XIVShinies.SyncPlugin.Api;
 // Our own window classes.
 using XIVShinies.SyncPlugin.Windows;
 
@@ -52,6 +55,11 @@ public sealed class Plugin : IDalamudPlugin
     private readonly WindowSystem windowSystem = new("XIVShiniesSync");
     private readonly MainWindow mainWindow;
 
+    // The HTTPS client for the XIV Shinies API. Constructed here but never called on its own —
+    // nothing is uploaded until the user explicitly opts in. It owns an HttpClient, so it must be
+    // disposed below.
+    private readonly ApiClient apiClient;
+
     /// <summary>
     /// Constructor — Dalamud calls this once on load. Wire everything up here, and be sure to
     /// tear down in Dispose whatever you set up here (handlers, events, windows).
@@ -64,6 +72,11 @@ public sealed class Plugin : IDalamudPlugin
         // is one, otherwise a new default config".
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
+        // Build the API client from the persisted settings. The manifest carries the version the
+        // build stamped in, which becomes the User-Agent and the payload's pluginVersion field.
+        var version = PluginInterface.Manifest.AssemblyVersion?.ToString() ?? "0.0.0";
+        apiClient = new ApiClient(Configuration.Settings, version);
+
         // Create our window and hand it to the WindowSystem so it gets drawn each frame.
         mainWindow = new MainWindow();
         windowSystem.AddWindow(mainWindow);
@@ -72,7 +85,7 @@ public sealed class Plugin : IDalamudPlugin
         // object-initializer sets the help text shown in /xlhelp.
         CommandManager.AddHandler(PluginMeta.CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = $"Open {PluginMeta.DisplayName}.",
+            HelpMessage = $"Toggle the {PluginMeta.DisplayName} window.",
         });
 
         // Register a longer alias that runs the same handler. ShowInHelp = false keeps /xlhelp
@@ -109,6 +122,9 @@ public sealed class Plugin : IDalamudPlugin
 
         windowSystem.RemoveAllWindows();
         mainWindow.Dispose();
+
+        // Releases the underlying HttpClient and its connection pool.
+        apiClient.Dispose();
 
         CommandManager.RemoveHandler(PluginMeta.CommandName);
         CommandManager.RemoveHandler(PluginMeta.CommandAlias);

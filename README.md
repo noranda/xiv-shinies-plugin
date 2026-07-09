@@ -50,9 +50,11 @@ _(The `repo.json` pluginmaster and tagged release zips land in a later task.)_
 
 1. `dotnet build -c Release`
 2. In-game, open `/xlsettings` → **Experimental** → **Dev Plugin Locations**.
-3. Add the built manifest path:
-   `src\XIVShinies.SyncPlugin\bin\Release\XIVShinies.SyncPlugin.json`
-4. Enable the plugin in `/xlplugins` → **Dev Tools** and run `/shinies`.
+3. Point it at the built DLL:
+   `src\XIVShinies.SyncPlugin\bin\Release\XIVShinies.SyncPlugin.dll`
+   (Dalamud reads the manifest `.json` that sits next to it.)
+   Then **click Save** — the location does not register until you do.
+4. Enable the plugin in `/xlplugins` → **Dev Tools** → **Installed Dev Plugins**, then run `/shinies`.
 
 ## Building
 

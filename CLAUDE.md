@@ -85,9 +85,12 @@ dotnet test       # xUnit suite
 
 ### Loading in-game (manual QA)
 
-`/xlsettings` → Experimental → Dev Plugin Locations → add
-`src\XIVShinies.SyncPlugin\bin\Release\XIVShinies.SyncPlugin.json`; enable in `/xlplugins`
-→ Dev Tools; run `/shinies`. Use `/xllog` to see the plugin's log output.
+`/xlsettings` → Experimental → Dev Plugin Locations → point it at the **built DLL**,
+`src\XIVShinies.SyncPlugin\bin\Release\XIVShinies.SyncPlugin.dll` (Dalamud reads the manifest
+`.json` sitting next to it), then **click Save** — until it is saved the location never
+registers and `/xlplugins` shows no Dev Tools section at all. Then enable the plugin in
+`/xlplugins` → Dev Tools → Installed Dev Plugins and run `/shinies`. Use `/xllog` to see the
+plugin's log output.
 
 ## Testing philosophy — pure logic vs. game surfaces
 
@@ -130,15 +133,21 @@ The plugin targets eventual submission to the official Dalamud repo, whose revie
 the following. Treat them as hard requirements — a miss can mean rejection or a ban, not a
 nit (sources: dalamud.dev `plugin-publishing/restrictions`, `plugin-development/technical-considerations`):
 
-- **Local player only.** Never read the object table, party list, or any other character's
-  ContentId "in any form, regardless of the intended use" — a hard, ban-enforced rule. Only
-  the local player (`IPlayerState` / `ClientState.LocalContentId`).
-- **Hash player identifiers client-side.** SHA-256 the ContentId before it leaves the
-  process; the raw ulong never travels and never lands in logs, config, or request bodies.
-  Keep the digest deterministic across sessions (fixed byte representation).
-- **Network:** HTTPS only, connect by **DNS hostname** (never a raw IP), keep the backend
-  URL **user-overridable**, and send `User-Agent: XIVShinies.SyncPlugin/<version>`. Base URL
-  `https://xiv-shinies.com`.
+- **Local player only.** The rule: your plugin must not "collect account IDs of player
+  characters beyond your own **in any form, regardless of the intended use**". It is
+  ban-enforced. In practice: never read the object table or party list; only the local
+  player (`IPlayerState` / `ClientState.LocalContentId`).
+- **Hash player identifiers client-side.** Dalamud's wording is a recommendation —
+  "whenever feasible, plugins **should** hash information about the local player (such as
+  the player's Content ID or name) on the client side" — but this project treats it as a
+  hard requirement: SHA-256 the ContentId before it leaves the process, the raw ulong never
+  travels and never lands in logs, config, or request bodies, and the digest stays
+  deterministic across sessions (fixed byte representation).
+- **Network:** HTTPS only (the rule also requires the server's certificate be "issued from a
+  trusted certificate authority such as Let's Encrypt"); connect by **DNS hostname, never a
+  raw IP** (there is *no* loopback exemption — use `localhost`, not `127.0.0.1`); keep the
+  backend URL **user-overridable**; and send `User-Agent: XIVShinies.SyncPlugin/<version>`.
+  Base URL `https://xiv-shinies.com`.
 - **Explicit opt-in before any upload.** No silent first-run upload and no background polling
   of the server without user action — uploads are user-chosen (onboarding consent) and
   login/event/interval-driven, never a tight poll. Disclose exactly what is sent.
