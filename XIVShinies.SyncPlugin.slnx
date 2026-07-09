@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/XIVShinies.SyncPlugin/XIVShinies.SyncPlugin.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/XIVShinies.SyncPlugin.Tests/XIVShinies.SyncPlugin.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,15 @@
+{
+  "Author": "Noranda",
+  "Name": "XIV Shinies Sync",
+  "Punchline": "Sync your in-game collection progress to XIV Shinies automatically.",
+  "Description": "Reads completed quests, achievements, mounts, minions, and relic-stage item possession directly from the game client and uploads them to your XIV Shinies account, so you stop hand-marking. Fully opt-in and per-category. Open the settings with /shinies.",
+  "ApplicableVersion": "any",
+  "RepoUrl": "https://github.com/noranda/xiv-shinies-plugin",
+  "Tags": [
+    "collection",
+    "sync",
+    "quests",
+    "relics",
+    "achievements"
+  ]
+}

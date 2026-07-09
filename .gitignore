@@ -1,0 +1,19 @@
+# Build output and IDE state (goatcorp/SamplePlugin baseline)
+.vs/
+obj/
+bin/
+*.user
+
+# --- Project-specific additions ---
+
+# Rider / IntelliJ
+.idea/
+
+# Personal VS Code state — not committed
+.vscode/
+
+# Release / packaging output (DalamudPackager)
+dist/
+
+# Personal, per-machine Claude Code overrides (permission allowlist, etc.) — not committed
+.claude/settings.local.json

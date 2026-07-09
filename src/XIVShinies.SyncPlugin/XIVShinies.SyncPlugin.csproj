@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A .csproj file is the C# project definition. Loosely, it's this project's package.json +
+  build config rolled into one XML file: it declares the build "SDK", project settings, NuGet
+  package references, and file includes. The build tool (MSBuild, invoked by `dotnet build`)
+  reads it.
+
+  Sdk="Dalamud.NET.Sdk/15.0.0" picks the *MSBuild SDK* that governs the whole build — the "15"
+  ties us to Dalamud API level 15. This one SDK does a lot for us automatically, so this file
+  can stay tiny. It:
+    - sets the target framework (net10.0-windows) — so we never write <TargetFramework> here,
+    - references the Dalamud, ImGui, Lumina and FFXIVClientStructs libraries from the local
+      XIVLauncher dev install (%AppData%\XIVLauncher\addon\Hooks\dev),
+    - merges our companion manifest (XIVShinies.SyncPlugin.json) with build-derived fields into
+      the final packaged manifest, and
+    - runs DalamudPackager to emit a loadable plugin zip on Release builds.
+-->
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <!--
+    <PropertyGroup> holds scalar build settings (name=value). Compare to top-level keys in a
+    package.json. You can have several PropertyGroups; MSBuild merges them.
+  -->
+  <PropertyGroup>
+    <!--
+      <Version> is the plugin's release version. The Dalamud SDK copies it into the packaged
+      manifest as "AssemblyVersion" (seen as "0.0.1.0" once normalized to four parts).
+    -->
+    <Version>0.0.1</Version>
+
+    <!--
+      <PackageProjectUrl> is the standard .NET "project URL" property. We set it for good
+      hygiene, but note the Dalamud manifest's own "RepoUrl" field is set explicitly in
+      XIVShinies.SyncPlugin.json — the SDK does not derive RepoUrl from this property.
+    -->
+    <PackageProjectUrl>https://github.com/noranda/xiv-shinies-plugin</PackageProjectUrl>
+
+    <!-- SPDX license id; matches the repo's MIT LICENSE file. -->
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+
+    <!--
+      This project ships as a Dalamud plugin, not as a NuGet package, so disable `dotnet pack`.
+    -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    The packaged plugin manifest is assembled from two sources:
+      1) XIVShinies.SyncPlugin.json (this folder) — the human-authored descriptive fields:
+         Author, Name, Punchline, Description, ApplicableVersion, RepoUrl, Tags. It's strict
+         JSON, so it carries no comments; each field's meaning is documented here instead.
+      2) Build-derived fields the SDK injects: InternalName (the assembly name,
+         "XIVShinies.SyncPlugin"), AssemblyVersion (from <Version> above), and
+         DalamudApiLevel (15, from the SDK version).
+    The merged result lands at bin/Release/XIVShinies.SyncPlugin.json and inside the packaged
+    zip — that's what Dalamud actually reads when loading the plugin.
+  -->
+</Project>

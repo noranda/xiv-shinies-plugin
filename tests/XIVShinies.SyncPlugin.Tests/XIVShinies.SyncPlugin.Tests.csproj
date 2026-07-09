@@ -1,0 +1,53 @@
+<!--
+  The test project. Unlike the plugin, this uses the plain Microsoft.NET.Sdk (a normal .NET
+  library/app), because tests are just ordinary code run by a test runner — they don't ship
+  as a Dalamud plugin.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!--
+      Must match the plugin's target framework exactly. The Dalamud SDK builds the plugin as
+      net10.0-windows, and a project can only reference another project on a compatible
+      framework — so we pin the same value here. (If the plugin's TFM ever changes, change it
+      here too.)
+    -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+
+    <!--
+      Turns on "nullable reference types": the compiler tracks which references may be null and
+      warns if you risk a null dereference. Roughly like TypeScript's strictNullChecks. The
+      plugin project gets this from the Dalamud SDK automatically; here we opt in explicitly.
+    -->
+    <Nullable>enable</Nullable>
+
+    <!-- Use the newest C# language version the SDK supports. -->
+    <LangVersion>latest</LangVersion>
+
+    <!-- Tests are never packaged or published as a deliverable. -->
+    <IsPackable>false</IsPackable>
+    <IsPublishable>false</IsPublishable>
+  </PropertyGroup>
+
+  <!--
+    <ItemGroup> holds *lists* of things (as opposed to PropertyGroup's single values). Here it
+    lists NuGet package dependencies — the equivalent of "devDependencies" in package.json.
+    <PackageReference> pulls a package from nuget.org at the pinned version.
+  -->
+  <ItemGroup>
+    <!-- The MSBuild/VSTest plumbing that lets `dotnet test` discover and run the tests. -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <!-- xUnit itself — the assertion library and [Fact] attribute (like Jest/Vitest). -->
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <!-- The adapter that reports xUnit results to the VSTest runner used by `dotnet test`. -->
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <!--
+    A <ProjectReference> is a dependency on another project in this repo (not a NuGet package).
+    This is how the tests "see" the plugin's public types (like PluginMeta). The relative path
+    walks up from tests/XIVShinies.SyncPlugin.Tests/ to the plugin's .csproj.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\XIVShinies.SyncPlugin\XIVShinies.SyncPlugin.csproj" />
+  </ItemGroup>
+</Project>
