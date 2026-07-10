@@ -43,8 +43,11 @@ public sealed class ExcelUnlockCollector<TRow> : ICollector, IUnlockAware
     // Returns a skip reason when the source cannot be read yet, or null when it can.
     private readonly Func<string?>? precondition;
 
+    // How this collection names and describes itself to the user.
+    private readonly CategoryInfo info;
+
     /// <summary>Creates a collector for one sheet.</summary>
-    /// <param name="categoryKey">The payload key these IDs are sent under.</param>
+    /// <param name="info">The category's wire key and its user-facing copy.</param>
     /// <param name="dataManager">Dalamud's game data accessor.</param>
     /// <param name="framework">Used to verify we are on the framework thread before reading.</param>
     /// <param name="rowId">Reads a row's ID (usually <c>row =&gt; row.RowId</c>).</param>
@@ -55,14 +58,14 @@ public sealed class ExcelUnlockCollector<TRow> : ICollector, IUnlockAware
     /// category from the upload, which is safe: the server treats absence as "not read this time".
     /// </param>
     public ExcelUnlockCollector(
-        string categoryKey,
+        CategoryInfo info,
         IDataManager dataManager,
         IFramework framework,
         Func<TRow, uint> rowId,
         Func<TRow, bool> isUnlocked,
         Func<string?>? precondition = null)
     {
-        CategoryKey = categoryKey;
+        this.info = info;
         this.dataManager = dataManager;
         this.framework = framework;
         this.rowId = rowId;
@@ -71,7 +74,13 @@ public sealed class ExcelUnlockCollector<TRow> : ICollector, IUnlockAware
     }
 
     /// <inheritdoc/>
-    public string CategoryKey { get; }
+    public string CategoryKey => info.Key;
+
+    /// <inheritdoc/>
+    public string DisplayName => info.DisplayName;
+
+    /// <inheritdoc/>
+    public string WhatGetsSent => info.WhatGetsSent;
 
     /// <inheritdoc/>
     // Each collector recognises only its own sheet, so routing an unlock needs no lookup table and

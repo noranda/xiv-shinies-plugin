@@ -31,6 +31,38 @@ public static class CollectSkipReasons
     /// Achievements window once; the settings UI turns this reason into that hint.
     /// </summary>
     public const string AchievementListNotLoaded = "achievement_list_not_loaded";
+
+    /// <summary>
+    /// Turns a skip reason into a sentence for the settings window, or null if it is not worth saying.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Note carefully what this switches on: a <b>reason</b>, never a category. That is the whole
+    /// trick behind the "open your Achievements window once" hint. The achievements collector reports
+    /// <see cref="AchievementListNotLoaded"/>; this turns that reason into advice; and the window
+    /// prints it beside whichever category reported it. Nothing anywhere names achievements. A future
+    /// collector that reports the same reason gets the same hint for free.
+    /// </para>
+    /// <para>
+    /// An unrecognized reason returns null rather than the raw code — a wire string like
+    /// <c>"collector_error"</c> means nothing to a player, and a category that simply could not be
+    /// read this pass is not something they can act on.
+    /// </para>
+    /// </remarks>
+    public static string? Describe(string reason) => reason switch
+    {
+        AchievementListNotLoaded =>
+            "Open your Achievements window in game once, so the game will tell the plugin which " +
+            "achievements you have earned.",
+
+        NoRemoteConfig => "Waiting for XIV Shinies to say which items to look for.",
+
+        InventoryUnavailable => "Log in to a character so your inventory can be read.",
+
+        // "disabled" needs no explanation: the checkbox beside it already says so. "collector_error"
+        // and "sheet_unavailable" are bugs or transient game states the user cannot do anything about.
+        _ => null,
+    };
 }
 
 /// <summary>

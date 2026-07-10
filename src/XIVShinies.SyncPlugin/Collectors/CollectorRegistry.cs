@@ -15,6 +15,52 @@ namespace XIVShinies.SyncPlugin.Collectors;
 /// </remarks>
 public static class CollectorRegistry
 {
+    // The user-facing copy for each collection, alongside its wire key. `WhatGetsSent` is shown next
+    // to the opt-in toggle before the user consents, so it is a compliance surface: it must stay a
+    // true description of what the matching collector actually uploads.
+
+    private static readonly CategoryInfo Quests = new()
+    {
+        Key = CategoryKeys.Quests,
+        DisplayName = "Quests",
+        WhatGetsSent = "The ID numbers of quests you have completed.",
+    };
+
+    private static readonly CategoryInfo Mounts = new()
+    {
+        Key = CategoryKeys.Mounts,
+        DisplayName = "Mounts",
+        WhatGetsSent = "The ID numbers of mounts you have unlocked.",
+    };
+
+    private static readonly CategoryInfo Minions = new()
+    {
+        Key = CategoryKeys.Minions,
+        DisplayName = "Minions",
+        WhatGetsSent = "The ID numbers of minions you have unlocked.",
+    };
+
+    private static readonly CategoryInfo Achievements = new()
+    {
+        Key = CategoryKeys.Achievements,
+        DisplayName = "Achievements",
+        WhatGetsSent = "The ID numbers of achievements you have earned.",
+    };
+
+    private static readonly CategoryInfo Items = new()
+    {
+        Key = CategoryKeys.Items,
+        DisplayName = "Relic items",
+
+        // Says plainly that the search covers the character's own storage, retainers included. Only
+        // the counts of the items XIV Shinies named ever leave the machine, but a disclosure that
+        // omitted where the plugin looks would be technically true and practically misleading.
+        WhatGetsSent =
+            "For a short list of items XIV Shinies asks about, how many of each you own. These prove " +
+            "relic progress. The plugin counts them across your own inventory, armoire, glamour " +
+            "dresser, saddlebag, and retainers. No other item is counted, and nothing else is sent.",
+    };
+
     /// <summary>Creates every collector, in the order they will be run.</summary>
     /// <param name="dataManager">Dalamud's game data accessor.</param>
     /// <param name="unlockState">Dalamud's local-player unlock state.</param>
@@ -30,20 +76,20 @@ public static class CollectorRegistry
 
             // Quest Excel row IDs are what the server stores, so no mapping is needed.
             new ExcelUnlockCollector<Quest>(
-                CategoryKeys.Quests, dataManager, framework, row => row.RowId, unlockState.IsQuestCompleted),
+                Quests, dataManager, framework, row => row.RowId, unlockState.IsQuestCompleted),
 
             new ExcelUnlockCollector<Mount>(
-                CategoryKeys.Mounts, dataManager, framework, row => row.RowId, unlockState.IsMountUnlocked),
+                Mounts, dataManager, framework, row => row.RowId, unlockState.IsMountUnlocked),
 
             // The game calls minions "Companions".
             new ExcelUnlockCollector<Companion>(
-                CategoryKeys.Minions, dataManager, framework, row => row.RowId, unlockState.IsCompanionUnlocked),
+                Minions, dataManager, framework, row => row.RowId, unlockState.IsCompanionUnlocked),
 
             // Achievements are the one sheet the game cannot answer for until the player has opened
             // their Achievements window at least once this session. Until then we skip the category
             // rather than report an empty list, which would be a lie the server must not act on.
             new ExcelUnlockCollector<Achievement>(
-                CategoryKeys.Achievements,
+                Achievements,
                 dataManager,
                 framework,
                 row => row.RowId,
@@ -54,6 +100,6 @@ public static class CollectorRegistry
 
             // The odd one out: it reports possession counts rather than IDs, and it only looks at
             // the items the server named in its manifest. The runner treats it like any other.
-            new ItemCollector(CategoryKeys.Items, dataManager, framework),
+            new ItemCollector(Items, dataManager, framework),
         };
 }

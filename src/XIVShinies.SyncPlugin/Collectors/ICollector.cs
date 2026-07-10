@@ -29,6 +29,28 @@ public interface ICollector
     string CategoryKey { get; }
 
     /// <summary>
+    /// The category's name as a person reads it (for example <c>"Mounts"</c>).
+    /// </summary>
+    /// <remarks>
+    /// The copy lives on the collector rather than in the settings window on purpose. If the window
+    /// held a key-to-label table, adding a collection would mean editing the window too, and that
+    /// table would be a category-name branch by another name. A collector describes itself; the UI
+    /// renders whatever it is handed.
+    /// </remarks>
+    string DisplayName { get; }
+
+    /// <summary>
+    /// A plain-language sentence naming exactly what leaves the player's machine for this category.
+    /// </summary>
+    /// <remarks>
+    /// Shown next to the opt-in toggle. Dalamud requires that users be told what is collected before
+    /// they consent to it, so this is a compliance surface, not decoration: it must describe the real
+    /// payload, and it must be updated whenever <see cref="Collect"/> starts sending something new.
+    /// Write it for someone who has never read this code.
+    /// </remarks>
+    string WhatGetsSent { get; }
+
+    /// <summary>
     /// Reads the facts from the game, or explains why it could not.
     /// </summary>
     /// <param name="context">

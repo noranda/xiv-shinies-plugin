@@ -124,8 +124,9 @@ public sealed class Plugin : IDalamudPlugin
             Framework, ClientState, PlayerState, UnlockState, Log,
             apiClient, Configuration.Settings, collectors, version);
 
-        // Create our window and hand it to the WindowSystem so it gets drawn each frame.
-        mainWindow = new MainWindow();
+        // Create our window and hand it to the WindowSystem so it gets drawn each frame. It reads the
+        // sync manager's status and the collectors' self-descriptions, so it is built after both.
+        mainWindow = new MainWindow(Configuration, apiClient, syncManager, collectors);
         windowSystem.AddWindow(mainWindow);
 
         // Register the /shinies command. CommandInfo takes the handler method (OnCommand); the

@@ -164,9 +164,9 @@ public sealed class SyncScheduler
 
     /// <summary>Records that an upload completed, restarting the interval clock if it was a full sweep.</summary>
     /// <remarks>
-    /// An <c>unlock</c> upload carried a single category, so it is not a sweep and must not postpone
-    /// the next one. Otherwise a player who keeps unlocking things would never run a full sweep, and
-    /// the categories nothing unlocked in would drift out of date indefinitely.
+    /// An <c>unlock</c> upload carried only the categories that changed, so it is not a sweep and must
+    /// not postpone the next one. Otherwise a player who keeps unlocking things would never run a full
+    /// sweep, and the categories nothing unlocked in would drift out of date indefinitely.
     /// </remarks>
     public void MarkUploaded(SyncTrigger trigger, DateTimeOffset now)
     {

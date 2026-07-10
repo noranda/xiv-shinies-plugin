@@ -21,6 +21,10 @@ public class CollectorSelectionTests
 
         public string CategoryKey { get; }
 
+        public string DisplayName => CategoryKey;
+
+        public string WhatGetsSent => $"Facts about {CategoryKey}.";
+
         public CollectResult Collect(CollectContext context) => CollectResult.Ids(new uint[] {1});
     }
 

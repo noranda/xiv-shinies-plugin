@@ -30,6 +30,12 @@ public class CollectorRunnerTests
 
         public string CategoryKey { get; }
 
+        // The user-facing copy. Its content is irrelevant to the runner, which is the point: the
+        // runner never reads it.
+        public string DisplayName => CategoryKey;
+
+        public string WhatGetsSent => $"Facts about {CategoryKey}.";
+
         public int CollectCallCount { get; private set; }
 
         public CollectContext? LastContext { get; private set; }

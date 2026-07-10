@@ -115,9 +115,11 @@ internal sealed class SyncManager : IDisposable
     /// </remarks>
     private volatile int lastStatusCode = -1;
 
-    // The next three are touched ONLY on the framework thread — from the Update handler and from the
+    // The next three are WRITTEN only on the framework thread — from the Update handler and from the
     // Login/Logout/Unlock events, which Dalamud raises on that same thread. They therefore need no
-    // synchronization. Moving any of them to a background thread would change that.
+    // synchronization between writers. (`identity` is additionally null-checked by the settings window
+    // via HasCharacter; a reference read is atomic, so the worst case there is a one-frame-stale
+    // status line.) Writing any of them from a background thread would break this reasoning.
 
     /// <summary>The character to attribute uploads to. Null whenever nobody is logged in.</summary>
     private CharacterIdentity? identity;
@@ -130,6 +132,26 @@ internal sealed class SyncManager : IDisposable
 
     /// <summary>When the next <c>/config</c> poll is due. Null means "poll at the first opportunity".</summary>
     private DateTimeOffset? nextConfigPollAt;
+
+    /// <summary>
+    /// Why each category was omitted from the most recent collection pass, keyed by category.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Kept so the settings window can explain a category that never appears — for example, that the
+    /// achievements list must be opened once before the game will answer for it. The window renders
+    /// whatever reason it is handed, which is how that hint reaches the user without anyone writing a
+    /// branch on a category name.
+    /// </para>
+    /// <para>
+    /// <c>volatile</c>, and replaced wholesale rather than mutated. The writer is the collection pass
+    /// on the framework thread; the reader is the window's draw call, which Dalamud may or may not
+    /// invoke on that same thread. Rather than depend on the answer, the dictionary handed out is
+    /// never touched again — a reader either sees the whole old map or the whole new one, never a map
+    /// mid-update. Mutating it in place would be a genuine data race if the threads ever differ.
+    /// </para>
+    /// </remarks>
+    private volatile IReadOnlyDictionary<string, string> lastSkipped = new Dictionary<string, string>();
 
     /// <summary>Wires the manager to the game. Subscribes only; uploads nothing.</summary>
     public SyncManager(
@@ -177,6 +199,19 @@ internal sealed class SyncManager : IDisposable
 
     /// <summary>The most recent server config, for the settings window to render category switches from.</summary>
     public ConfigResponse? RemoteConfig => remoteConfig;
+
+    /// <summary>
+    /// Why each category was skipped by the last collection pass. Empty before the first pass.
+    /// </summary>
+    /// <remarks>The returned dictionary is never mutated, so it is safe to read from any thread.</remarks>
+    public IReadOnlyDictionary<string, string> LastSkipped => lastSkipped;
+
+    /// <summary>True when a character is loaded and identified, so an upload could actually happen.</summary>
+    /// <remarks>
+    /// A null check on a reference, which is atomic. The window may read this from the draw call while
+    /// the framework thread is writing it; the worst outcome is a status line that is one frame stale.
+    /// </remarks>
+    public bool HasCharacter => identity is not null;
 
     /// <summary>Queues an immediate full sweep, as when the user presses "Sync now".</summary>
     /// <remarks>
@@ -236,6 +271,11 @@ internal sealed class SyncManager : IDisposable
         identity = null;
         loginSettledAt = null;
         identityAttempts = 0;
+
+        // Skip reasons describe the session that just ended — the achievements list, for instance, is
+        // unloaded on logout. Carrying them into the next character would show hints about a state
+        // that no longer exists.
+        lastSkipped = new Dictionary<string, string>();
 
         // Queued work belongs to the character that queued it. Uploading it after a character switch
         // would attribute one character's unlocks to another.
@@ -417,6 +457,12 @@ internal sealed class SyncManager : IDisposable
 
             LogCollectionCost(snapshot, due.Trigger);
 
+            // Kept for the settings window. An unlock pass runs only the collectors whose categories
+            // changed, so it can speak for those and no others; replacing the whole map would erase
+            // every absent category's reason. Merging keeps the last thing each category said about
+            // itself.
+            RememberSkipReasons(snapshot);
+
             if (snapshot.Collections.Count == 0)
             {
                 // Every category was disabled, skipped, or unreadable. An empty `collections` object
@@ -446,6 +492,30 @@ internal sealed class SyncManager : IDisposable
         // never run, `uploadInFlight` would stay true, and syncing would be dead for the rest of the
         // session. Cancellation is instead observed inside UploadAsync, where the flag is cleared.
         _ = Task.Run(() => UploadAsync(request, due.Trigger));
+    }
+
+    /// <summary>
+    /// Folds this pass's skip reasons into what the settings window shows.
+    /// </summary>
+    /// <remarks>
+    /// Merged rather than replaced. An <c>unlock</c> pass runs only the collectors for the categories
+    /// that changed — one, or several when a burst of unlocks was debounced together — so it knows
+    /// nothing about the rest. Overwriting the map with its results would wipe their reasons and make
+    /// the window claim every absent category is fine. A category that succeeded this time has its
+    /// stale reason removed; a category that did not run keeps whatever it last said.
+    /// </remarks>
+    private void RememberSkipReasons(CollectionSnapshot snapshot)
+    {
+        var merged = new Dictionary<string, string>(lastSkipped);
+
+        foreach (var (category, reason) in snapshot.Skipped)
+            merged[category] = reason;
+
+        // Whatever was read successfully this pass is no longer skipped.
+        foreach (var category in snapshot.Collections.Keys)
+            merged.Remove(category);
+
+        lastSkipped = merged;
     }
 
     /// <summary>
