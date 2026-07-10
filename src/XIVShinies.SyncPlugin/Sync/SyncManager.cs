@@ -116,6 +116,16 @@ internal sealed class SyncManager : IDisposable
     private volatile int lastStatusCode = -1;
 
     /// <summary>
+    /// When the last successful upload completed, boxed, or null if none has this session.
+    /// </summary>
+    /// <remarks>
+    /// A boxed <see cref="DateTimeOffset"/> rather than a plain field because <c>volatile</c> cannot
+    /// be applied to a struct type — but a reference write is atomic, so boxing buys a safe
+    /// cross-thread handoff. Written by the background task, read by the UI.
+    /// </remarks>
+    private volatile object? lastSyncedAtBox;
+
+    /// <summary>
     /// Bumped on logout, so a response that arrives for a character who already left can be
     /// recognized and discarded.
     /// </summary>
@@ -208,6 +218,18 @@ internal sealed class SyncManager : IDisposable
     /// <summary>The last upload's outcome, or null if none has completed. For the settings window.</summary>
     public ApiStatus? LastStatus => lastStatusCode < 0 ? null : (ApiStatus)lastStatusCode;
 
+    /// <summary>When the last successful upload completed, or null if none has this session.</summary>
+    // `as DateTimeOffset?` unboxes when the box holds a value and yields null when the field is null,
+    // in one step.
+    public DateTimeOffset? LastSyncedAt => lastSyncedAtBox as DateTimeOffset?;
+
+    /// <summary>
+    /// The current character's name, or null when nobody is loaded. Lets the settings window say
+    /// "claim <c>Name</c> on the website" instead of something generic.
+    /// </summary>
+    /// <remarks>A reference read, so atomic; at worst one frame stale, like <see cref="HasCharacter"/>.</remarks>
+    public string? CharacterName => identity?.Name;
+
     /// <summary>True when syncing is halted until the user fixes something (bad token, unclaimed character).</summary>
     public bool BlockedPendingUserAction => blockedPendingUserAction;
 
@@ -299,6 +321,11 @@ internal sealed class SyncManager : IDisposable
         // makes them discard themselves when they land, instead of re-latching the halt (or a stale
         // status line) onto whoever logs in next.
         sessionGeneration++;
+
+        // The status line describes the previous character's last upload. Left in place it would
+        // flash — or, if nothing syncs, stick — on whoever logs in next.
+        lastStatusCode = -1;
+        lastSyncedAtBox = null;
 
         // Skip reasons describe the session that just ended — the achievements list, for instance, is
         // unloaded on logout. Carrying them into the next character would show hints about a state
@@ -604,7 +631,7 @@ internal sealed class SyncManager : IDisposable
                     return;
                 }
 
-                if (HandleResponse(response, trigger))
+                if (HandleResponse(response, trigger, startedFor))
                     return;
 
                 if (!RetryPolicy.ShouldRetryNow(response.Status, attempt))
@@ -635,14 +662,26 @@ internal sealed class SyncManager : IDisposable
     }
 
     /// <summary>Applies the server's answer to the scheduler. Returns true when the attempt is settled.</summary>
-    private bool HandleResponse(ApiResponse<SyncResponse> response, SyncTrigger trigger)
+    /// <param name="startedFor">The session generation the upload belongs to.</param>
+    private bool HandleResponse(ApiResponse<SyncResponse> response, SyncTrigger trigger, int startedFor)
     {
+        // Re-checked here, at the moment of writing, not only before the call: a logout can land in
+        // the gap between the caller's check and these writes, and a stale write after OnLogout's
+        // clears would put the previous character's status — or worse, a halt — onto the next one.
+        // The re-check shrinks that window from a network round trip to a few instructions.
+        if (startedFor != sessionGeneration)
+        {
+            log.Debug($"Discarding a {trigger} sync response from a previous session.");
+            return true;
+        }
+
         lastStatusCode = (int)response.Status;
         var now = timeProvider.GetUtcNow();
 
         if (response.Status == ApiStatus.Ok)
         {
             scheduler.MarkUploaded(trigger, now);
+            lastSyncedAtBox = now;
 
             // Categories the server refused (a per-category kill switch). Surfaced so the user is not
             // left wondering why a collection never appears on the website.

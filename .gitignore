@@ -17,3 +17,6 @@ dist/
 
 # Personal, per-machine Claude Code overrides (permission allowlist, etc.) — not committed
 .claude/settings.local.json
+
+# Local planning/QA working documents — never part of the public repo
+.claude/plans/

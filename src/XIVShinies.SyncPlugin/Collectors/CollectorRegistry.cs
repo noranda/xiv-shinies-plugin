@@ -56,9 +56,9 @@ public static class CollectorRegistry
         // the counts of the items XIV Shinies named ever leave the machine, but a disclosure that
         // omitted where the plugin looks would be technically true and practically misleading.
         WhatGetsSent =
-            "For a short list of items XIV Shinies asks about, how many of each you own. These prove " +
-            "relic progress. The plugin counts them across your own inventory, armoire, glamour " +
-            "dresser, saddlebag, and retainers. No other item is counted, and nothing else is sent.",
+            "Counts of the specific items XIV Shinies asks about, to prove relic progress — checked " +
+            "across your inventory, armoire, glamour dresser, saddlebag, and retainers. Nothing " +
+            "else is sent.",
     };
 
     /// <summary>Creates every collector, in the order they will be run.</summary>

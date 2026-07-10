@@ -7,6 +7,14 @@ using System.Numerics;
 // ImGuiNET package). ImGui is an "immediate mode" GUI: instead of building a retained tree of
 // components like React, you re-issue draw calls every frame inside Draw() below.
 using Dalamud.Bindings.ImGui;
+// Dalamud's standard palette (DalamudRed, HealerGreen, …), designed against its own themes —
+// preferred over hand-picked literals, which ignore the user's chosen style.
+using Dalamud.Interface.Colors;
+// Scaling helpers: users on high-DPI displays run Dalamud at 1.5–2x, and raw pixel sizes ignore it.
+using Dalamud.Interface.Utility;
+// Scoped wrappers for ImGui's push/pop pairs. `using (ImRaii.Disabled(...))` guarantees the matching
+// End/Pop even if the block throws — a whole class of unbalanced-stack bugs stops existing.
+using Dalamud.Interface.Utility.Raii;
 // The windowing helpers (Window base class, WindowSystem) that manage plugin windows for us.
 using Dalamud.Interface.Windowing;
 using XIVShinies.SyncPlugin.Api;
@@ -45,9 +53,11 @@ internal sealed class MainWindow : Window, IDisposable
     /// <summary>The longest token string the input box will accept, comfortably above the real 47.</summary>
     private const int TokenInputCapacity = 128;
 
-    private static readonly Vector4 ErrorColor = new(0.94f, 0.42f, 0.42f, 1f);
-    private static readonly Vector4 SuccessColor = new(0.45f, 0.85f, 0.55f, 1f);
-    private static readonly Vector4 MutedColor = new(0.65f, 0.65f, 0.65f, 1f);
+    // Colors come from Dalamud's own palette (and, for muted text, from the active style via
+    // ImGui.TextDisabled) rather than hardcoded literals: the user picks a Dalamud theme, including
+    // light ones, and a hand-picked grey that reads fine on dark is mush on light.
+    private static readonly Vector4 ErrorColor = ImGuiColors.DalamudRed;
+    private static readonly Vector4 SuccessColor = ImGuiColors.HealerGreen;
 
     private readonly Configuration configuration;
     private readonly SyncManager syncManager;
@@ -81,9 +91,20 @@ internal sealed class MainWindow : Window, IDisposable
         this.collectors = collectors;
         verifier = new TokenVerifier(apiClient);
 
+        // Sizing values are UNSCALED logical units: Dalamud's Window base multiplies Size and
+        // SizeConstraints by the user's global UI scale itself, so pre-scaling them (for example
+        // with ImGuiHelpers.ScaledVector2) double-scales — at high scales even the minimum can then
+        // exceed the screen.
+        //
+        // The opening size is computed in OnOpen and applied under FirstUseEver: ImGui uses it only
+        // when it has no remembered size for this window; after that the user's own resize wins and
+        // persists. MinimumSize is only a floor against squishing the window into uselessness — a
+        // minimum clamps UP, so an ambitious one would override the size the user chose.
+        SizeCondition = ImGuiCond.FirstUseEver;
+
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(460, 320),
+            MinimumSize = new Vector2(360, 240),
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
         };
 
@@ -94,6 +115,35 @@ internal sealed class MainWindow : Window, IDisposable
 
     /// <summary>Cancels any token probe still in flight.</summary>
     public void Dispose() => verifier.Dispose();
+
+    /// <summary>
+    /// Chooses the window's opening size: the content's preferred size, capped by the screen.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Scale alone cannot decide this: at high UI scales the logical desktop shrinks, so a
+    /// reasonable content size can be an unreasonable share of the screen. The preferred size is
+    /// therefore capped against the display, with both sides in logical units — ImGui reports the
+    /// display in physical pixels, dividing by the scale converts it, and Dalamud scales the result
+    /// back up when applying <see cref="Window.Size"/>.
+    /// </para>
+    /// <para>
+    /// Computed here rather than in the constructor because the display size comes from ImGui,
+    /// which is only safely consulted inside its own frame — OnOpen runs before the frame's size
+    /// conditionals are applied. Under <c>FirstUseEver</c> the value matters only when ImGui has no
+    /// remembered size for this window; thereafter the user's resize always wins.
+    /// </para>
+    /// </remarks>
+    public override void OnOpen()
+    {
+        var displayLogical = ImGui.GetIO().DisplaySize / ImGuiHelpers.GlobalScale;
+
+        // The height preference is generous because the settings list is currently tall; when the
+        // rows become more compact, lower the preference rather than raising the cap.
+        Size = new Vector2(
+            Math.Min(560f, displayLogical.X * 0.45f),
+            Math.Min(620f, displayLogical.Y * 0.70f));
+    }
 
     /// <summary>
     /// Called once per frame by the WindowSystem while the window is open, so everything here runs
@@ -123,6 +173,17 @@ internal sealed class MainWindow : Window, IDisposable
 
     private void DrawWizard()
     {
+        // "Step 1 of 3" — without it the wizard's length is unknowable, and a user cannot tell
+        // whether "Continue" is the second click of three or of ten. The numbers come from the
+        // enum's positions, so a new step renumbers this automatically.
+        var stepCount = (int)OnboardingStep.Done;
+        var stepNumber = (int)onboarding.Step + 1;
+        if (stepNumber <= stepCount)
+        {
+            ImGui.TextDisabled($"Step {stepNumber} of {stepCount}");
+            ImGui.Spacing();
+        }
+
         switch (onboarding.Step)
         {
             case OnboardingStep.Welcome:
@@ -151,7 +212,7 @@ internal sealed class MainWindow : Window, IDisposable
             "xiv-shinies.com, so the website knows what you own without you ticking it off by hand.");
 
         ImGui.Spacing();
-        ImGui.TextColored(MutedColor, "Everything it can send, and nothing else:");
+        ImGui.TextDisabled("Everything it can send, and nothing else:");
         ImGui.Spacing();
 
         // Each collector describes itself. Adding a collection makes it appear here with no change
@@ -198,7 +259,7 @@ internal sealed class MainWindow : Window, IDisposable
             ImGui.SetClipboardText(BackendUrl.Default);
 
         ImGui.SameLine();
-        ImGui.TextColored(MutedColor, BackendUrl.Default);
+        ImGui.TextDisabled(BackendUrl.Default);
 
         ImGui.Spacing();
 
@@ -221,12 +282,13 @@ internal sealed class MainWindow : Window, IDisposable
         // uploads until onboarding is complete, and the master switch gates it thereafter.
         var canVerify = !verifier.InFlight && TokenFormat.IsWellFormed(tokenInput);
 
-        ImGui.BeginDisabled(!canVerify);
-        var verifyPressed = ImGui.Button("Verify");
-        ImGui.EndDisabled();
+        // `using` guarantees the matching EndDisabled even if something inside throws — the same
+        // job a `finally` would do, without the ceremony. An unbalanced disabled stack grays out
+        // everything drawn after it for the rest of the frame.
+        bool verifyPressed;
+        using (ImRaii.Disabled(!canVerify))
+            verifyPressed = ImGui.Button("Verify");
 
-        // Acted on AFTER EndDisabled, so an exception from the disk write cannot leave ImGui's
-        // disabled stack unbalanced and gray out the rest of the frame.
         if (verifyPressed)
         {
             configuration.Settings.Token = tokenInput;
@@ -251,20 +313,20 @@ internal sealed class MainWindow : Window, IDisposable
         switch (TokenFeedback.For(onboarding.TokenCheck, tokenInput))
         {
             case TokenFeedbackKind.Empty:
-                ImGui.TextColored(MutedColor, "Paste your token to continue.");
+                ImGui.TextDisabled("Paste your token to continue.");
                 break;
 
             case TokenFeedbackKind.Malformed:
-                ImGui.TextColored(
-                    MutedColor, $"That does not look like a token. They begin with {TokenFormat.Prefix}.");
+                ImGui.TextDisabled(
+                    $"That does not look like a token. They begin with {TokenFormat.Prefix}.");
                 break;
 
             case TokenFeedbackKind.ReadyToVerify:
-                ImGui.TextColored(MutedColor, "Select Verify to check this token.");
+                ImGui.TextDisabled("Select Verify to check this token.");
                 break;
 
             case TokenFeedbackKind.Checking:
-                ImGui.TextColored(MutedColor, "Checking with xiv-shinies.com…");
+                ImGui.TextDisabled("Checking with xiv-shinies.com…");
                 break;
 
             case TokenFeedbackKind.Accepted:
@@ -303,7 +365,7 @@ internal sealed class MainWindow : Window, IDisposable
         }
 
         ImGui.Spacing();
-        ImGui.TextColored(MutedColor, "Claimed characters:");
+        ImGui.TextDisabled("Claimed characters:");
 
         foreach (var character in account.Characters)
         {
@@ -340,12 +402,10 @@ internal sealed class MainWindow : Window, IDisposable
             ImGui.SameLine();
         }
 
-        ImGui.BeginDisabled(!onboarding.CanAdvance);
-        var forwardPressed = ImGui.Button(forwardLabel);
-        ImGui.EndDisabled();
+        bool forwardPressed;
+        using (ImRaii.Disabled(!onboarding.CanAdvance))
+            forwardPressed = ImGui.Button(forwardLabel);
 
-        // Acted on after EndDisabled, so a throwing disk write cannot leave ImGui's disabled stack
-        // unbalanced and gray out everything drawn after it.
         if (forwardPressed)
         {
             onboarding.Advance();
@@ -376,7 +436,7 @@ internal sealed class MainWindow : Window, IDisposable
             configuration.Save();
         }
 
-        ImGui.TextColored(MutedColor, "While this is off the plugin uploads nothing at all.");
+        ImGui.TextDisabled("While this is off the plugin uploads nothing at all.");
 
         ImGui.Spacing();
         DrawCategoryRows();
@@ -396,16 +456,31 @@ internal sealed class MainWindow : Window, IDisposable
 
     private void DrawStatus()
     {
-        if (syncManager.BlockedPendingUserAction)
+        // Ordered by which fact overrides which. The master switch beats everything: while it is
+        // off, reporting the last upload's outcome (with its "will try again") would be a lie — the
+        // plugin will not try again until the switch comes back.
+        if (!configuration.Settings.MasterEnabled)
         {
-            ImGui.TextColored(
-                ErrorColor,
-                "Syncing has stopped. Your token may have been revoked, or this character is not " +
-                "claimed on the website.");
+            // Red rather than muted: everything below this line is inert while the switch is off,
+            // and a quiet gray reads as "resting" when the truth is "doing nothing at all".
+            ImGui.TextColored(ErrorColor, "Syncing is switched off.");
+        }
+        else if (syncManager.BlockedPendingUserAction)
+        {
+            // The 403 case names the character when one is loaded, because "claim Some Name" is
+            // actionable and "your token may have been revoked, or…" is a shrug. The server echoes
+            // name and world for exactly this purpose; the local identity is the same information.
+            var claimTarget = syncManager.LastStatus == ApiStatus.CharacterNotClaimed
+                && syncManager.CharacterName is { } name
+                    ? $"Claim {name} on xiv-shinies.com, then press Sync now."
+                    : "Your token may have been revoked, or this character is not claimed on the " +
+                      "website. Fix it there, then press Sync now.";
+
+            DrawWrapped($"Syncing has stopped. {claimTarget}", ErrorColor);
         }
         else if (!syncManager.HasCharacter)
         {
-            ImGui.TextColored(MutedColor, "Waiting for a character to finish logging in.");
+            ImGui.TextDisabled("Waiting for a character to finish logging in.");
         }
         else if (syncManager.LastStatus is { } status)
         {
@@ -413,17 +488,36 @@ internal sealed class MainWindow : Window, IDisposable
         }
         else
         {
-            ImGui.TextColored(MutedColor, "Nothing has been uploaded yet this session.");
+            ImGui.TextDisabled("Nothing has been uploaded yet this session.");
         }
+
+        // "When?" is half of what a status line is for: without it, a deliberately quiet stretch
+        // (item acquisitions fire no event) is indistinguishable from a hang.
+        if (syncManager.LastSyncedAt is { } syncedAt)
+            ImGui.TextDisabled($"Last synced {TimeText.Ago(DateTimeOffset.UtcNow - syncedAt)}.");
 
         ImGui.Spacing();
 
         if (ImGui.Button("Sync now"))
             syncManager.RequestManualSync();
+
+        // Sets the expectation for every collection at once, so no category's own description has
+        // to explain the sync mechanism. Phrased by mechanism, not by category name: unlock-style
+        // acquisitions announce themselves and upload within seconds, while anything the game fires
+        // no event for (item possession, for instance) waits for the next scheduled sweep.
+        // Hidden while the master switch is off — every claim in it is false then, and the status
+        // line just said so.
+        if (configuration.Settings.MasterEnabled)
+        {
+            DrawWrapped(
+                "New unlocks upload within seconds. Everything else goes out with the next " +
+                "automatic sync — press Sync now to update immediately.",
+                ImGuiCol.TextDisabled);
+        }
     }
 
     /// <summary>Renders the last upload's outcome. Switches on a status, never on a category.</summary>
-    private static void DrawLastStatus(ApiStatus status)
+    private void DrawLastStatus(ApiStatus status)
     {
         switch (status)
         {
@@ -432,8 +526,11 @@ internal sealed class MainWindow : Window, IDisposable
                 break;
 
             case ApiStatus.CharacterNotClaimed:
-                ImGui.TextColored(
-                    ErrorColor, "Claim this character on xiv-shinies.com before it can sync.");
+                DrawWrapped(
+                    syncManager.CharacterName is { } name
+                        ? $"Claim {name} on xiv-shinies.com before it can sync."
+                        : "Claim this character on xiv-shinies.com before it can sync.",
+                    ErrorColor);
                 break;
 
             case ApiStatus.InvalidToken:
@@ -442,15 +539,15 @@ internal sealed class MainWindow : Window, IDisposable
 
             case ApiStatus.RateLimited:
             case ApiStatus.SyncDisabled:
-                ImGui.TextColored(MutedColor, "Waiting before the next upload, as the server asked.");
+                ImGui.TextDisabled("Waiting before the next upload, as the server asked.");
                 break;
 
             case ApiStatus.NetworkError:
-                ImGui.TextColored(MutedColor, "Could not reach xiv-shinies.com. Will try again.");
+                ImGui.TextDisabled("Could not reach xiv-shinies.com. Will try again.");
                 break;
 
             default:
-                ImGui.TextColored(MutedColor, "The last upload did not succeed. Will try again.");
+                ImGui.TextDisabled("The last upload did not succeed. Will try again.");
                 break;
         }
     }
@@ -467,25 +564,25 @@ internal sealed class MainWindow : Window, IDisposable
         var rows = CategorySettingsView.Build(
             collectors, configuration.Settings, syncManager.RemoteConfig, syncManager.LastSkipped);
 
+        DrawSelectAll(rows);
+
         foreach (var row in rows)
         {
+            var enabled = row.UserEnabled;
+            bool toggled;
+
             // The server switched this category off for everyone. Show it, disabled, with the user's
             // own preference intact underneath — flipping it back on later restores what they chose.
-            ImGui.BeginDisabled(!row.ServerEnabled);
+            using (ImRaii.Disabled(!row.ServerEnabled))
+            {
+                // Everything after `##` is hidden from the label but forms part of the widget's
+                // identity. ImGui derives a control's ID from its label text, so two collections that
+                // happened to choose the same DisplayName would share an ID and cross-wire their
+                // clicks. The category key is unique by construction, which makes this collision
+                // impossible rather than merely unlikely.
+                toggled = ImGui.Checkbox($"{row.DisplayName}##{row.Key}", ref enabled);
+            }
 
-            var enabled = row.UserEnabled;
-
-            // Everything after `##` is hidden from the label but forms part of the widget's identity.
-            // ImGui derives a control's ID from its label text, so two collections that happened to
-            // choose the same DisplayName would share an ID and cross-wire their clicks. The category
-            // key is unique by construction, which makes this collision impossible rather than merely
-            // unlikely.
-            var toggled = ImGui.Checkbox($"{row.DisplayName}##{row.Key}", ref enabled);
-
-            ImGui.EndDisabled();
-
-            // Saved after EndDisabled so a throwing disk write cannot leave ImGui's disabled stack
-            // unbalanced, which would gray out the remainder of the frame.
             if (toggled)
             {
                 configuration.Settings.SetCategoryEnabled(row.Key, enabled);
@@ -493,18 +590,72 @@ internal sealed class MainWindow : Window, IDisposable
             }
 
             ImGui.Indent();
-            ImGui.TextColored(MutedColor, row.WhatGetsSent);
+            DrawWrapped(row.WhatGetsSent, ImGuiCol.TextDisabled);
 
             if (!row.ServerEnabled)
-                ImGui.TextColored(MutedColor, "Temporarily switched off by XIV Shinies.");
+                ImGui.TextDisabled("Temporarily switched off by XIV Shinies.");
 
             // The collector said why it could not read this category; the reason is turned into
             // advice without anyone here knowing which category it was.
             if (row.SkipReason is { } reason && CollectSkipReasons.Describe(reason) is { } hint)
-                ImGui.TextColored(ErrorColor, hint);
+                DrawWrapped(hint, ErrorColor);
 
             ImGui.Unindent();
             ImGui.Spacing();
+        }
+    }
+
+    /// <summary>One checkbox that flips every collection at once.</summary>
+    /// <remarks>
+    /// Shown checked only when everything is on, so clicking it always does the obvious thing: from
+    /// "all on" it turns everything off, from anything else it turns everything on. It never names a
+    /// category — it iterates whatever rows exist. Server-disabled rows are left out of both the
+    /// reading and the writing, so this control reaches exactly the checkboxes the user could click
+    /// individually, no more.
+    /// </remarks>
+    private void DrawSelectAll(IReadOnlyList<CategorySettingsRow> rows)
+    {
+        var allEnabled = true;
+        foreach (var row in rows)
+        {
+            if (row.ServerEnabled)
+                allEnabled &= row.UserEnabled;
+        }
+
+        if (ImGui.Checkbox("All collections##selectAll", ref allEnabled))
+        {
+            foreach (var row in rows)
+            {
+                if (row.ServerEnabled)
+                    configuration.Settings.SetCategoryEnabled(row.Key, allEnabled);
+            }
+
+            configuration.Save();
+        }
+
+        ImGui.Spacing();
+    }
+
+    /// <summary>Draws wrapped text in a color, without unbalancing anything.</summary>
+    /// <remarks>
+    /// Needed because <c>TextWrapped</c> has no colored variant and <c>TextColored</c> does not
+    /// wrap — long category descriptions were running straight off the window edge. Pushing
+    /// <c>ImGuiCol.Text</c> recolors whatever text is drawn inside the scope.
+    /// </remarks>
+    private static void DrawWrapped(string text, Vector4 color)
+    {
+        using (ImRaii.PushColor(ImGuiCol.Text, color))
+        {
+            ImGui.TextWrapped(text);
+        }
+    }
+
+    /// <summary>Draws wrapped text in one of the current style's own colors.</summary>
+    private static void DrawWrapped(string text, ImGuiCol styleColor)
+    {
+        using (ImRaii.PushColor(ImGuiCol.Text, ImGui.GetColorU32(styleColor)))
+        {
+            ImGui.TextWrapped(text);
         }
     }
 
