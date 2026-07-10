@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 // Vector2/Vector4 are simple float tuples from the .NET math library. ImGui uses them for sizes,
-// positions, and colours (RGBA, each component 0..1).
+// positions, and colors (RGBA, each component 0..1).
 using System.Numerics;
 // At Dalamud API 15 the ImGui bindings live under Dalamud.Bindings.ImGui (NOT the older
 // ImGuiNET package). ImGui is an "immediate mode" GUI: instead of building a retained tree of
@@ -226,7 +226,7 @@ internal sealed class MainWindow : Window, IDisposable
         ImGui.EndDisabled();
 
         // Acted on AFTER EndDisabled, so an exception from the disk write cannot leave ImGui's
-        // disabled stack unbalanced and grey out the rest of the frame.
+        // disabled stack unbalanced and gray out the rest of the frame.
         if (verifyPressed)
         {
             configuration.Settings.Token = tokenInput;
@@ -239,7 +239,7 @@ internal sealed class MainWindow : Window, IDisposable
         DrawTokenCheckFeedback();
     }
 
-    /// <summary>Says what the token box should be telling the user, in a colour that matches.</summary>
+    /// <summary>Says what the token box should be telling the user, in a color that matches.</summary>
     /// <remarks>
     /// Which message applies is decided by <see cref="TokenFeedback"/>, which is pure and tested. All
     /// that is left here is turning a kind into pixels.
@@ -274,7 +274,7 @@ internal sealed class MainWindow : Window, IDisposable
 
             case TokenFeedbackKind.Rejected:
                 ImGui.TextColored(
-                    ErrorColor, "That token was not recognised. Generate a new one and paste it here.");
+                    ErrorColor, "That token was not recognized. Generate a new one and paste it here.");
                 break;
 
             case TokenFeedbackKind.Unreachable:
@@ -345,7 +345,7 @@ internal sealed class MainWindow : Window, IDisposable
         ImGui.EndDisabled();
 
         // Acted on after EndDisabled, so a throwing disk write cannot leave ImGui's disabled stack
-        // unbalanced and grey out everything drawn after it.
+        // unbalanced and gray out everything drawn after it.
         if (forwardPressed)
         {
             onboarding.Advance();
@@ -485,7 +485,7 @@ internal sealed class MainWindow : Window, IDisposable
             ImGui.EndDisabled();
 
             // Saved after EndDisabled so a throwing disk write cannot leave ImGui's disabled stack
-            // unbalanced, which would grey out the remainder of the frame.
+            // unbalanced, which would gray out the remainder of the frame.
             if (toggled)
             {
                 configuration.Settings.SetCategoryEnabled(row.Key, enabled);

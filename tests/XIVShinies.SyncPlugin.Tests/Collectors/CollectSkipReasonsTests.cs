@@ -58,7 +58,7 @@ public class CollectSkipReasonsTests
 
     // A reason invented by a future collector must not surface a raw code like "facewear_locked".
     [Fact]
-    public void An_unrecognised_reason_produces_no_advice_rather_than_its_raw_code()
+    public void An_unrecognized_reason_produces_no_advice_rather_than_its_raw_code()
     {
         Assert.Null(CollectSkipReasons.Describe("some_future_reason"));
     }

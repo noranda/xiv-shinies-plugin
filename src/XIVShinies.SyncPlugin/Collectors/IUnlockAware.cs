@@ -3,7 +3,7 @@ using Lumina.Excel;
 namespace XIVShinies.SyncPlugin.Collectors;
 
 /// <summary>
-/// Implemented by collectors that can recognise the game's real-time <c>Unlock</c> event as their
+/// Implemented by collectors that can recognize the game's real-time <c>Unlock</c> event as their
 /// own, so an unlock can upload just the one affected category.
 /// </summary>
 /// <remarks>

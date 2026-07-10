@@ -7,7 +7,7 @@ namespace XIVShinies.SyncPlugin.Collectors;
 /// </summary>
 /// <remarks>
 /// Naming keys here is not a category-name branch: nothing reads these constants to decide
-/// behaviour. Only the collectors themselves use them, to say what they are.
+/// behavior. Only the collectors themselves use them, to say what they are.
 /// </remarks>
 public static class CategoryKeys
 {

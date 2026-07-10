@@ -7,7 +7,7 @@ using XIVShinies.SyncPlugin.Sync;
 
 namespace XIVShinies.SyncPlugin.Tests.Sync;
 
-// The last line of defence before anything is uploaded. The API client checks the token's shape and
+// The last line of defense before anything is uploaded. The API client checks the token's shape and
 // the backend's safety; only this gate knows whether the USER agreed to any of it. "No silent
 // upload" is a Dalamud compliance rule, so it is enforced in code, not just in the UI.
 public class UploadGateTests

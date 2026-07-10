@@ -33,7 +33,7 @@ public enum TokenFeedbackKind
 /// <remarks>
 /// Extracted from the window because it is a real decision — it consults both the probe's outcome and
 /// the contents of the text box — and a window cannot be unit-tested. The window is left holding only
-/// the mapping from a kind to a colour and a sentence, which is the part that cannot be wrong in an
+/// the mapping from a kind to a color and a sentence, which is the part that cannot be wrong in an
 /// interesting way.
 /// </remarks>
 public static class TokenFeedback

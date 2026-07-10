@@ -45,7 +45,7 @@ internal sealed class TokenVerifier : IDisposable
     private volatile bool inFlight;
 
     /// <summary>
-    /// Bumped whenever the question changes, so an answer to an old question can be recognised and
+    /// Bumped whenever the question changes, so an answer to an old question can be recognized and
     /// thrown away.
     /// </summary>
     /// <remarks>

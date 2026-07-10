@@ -83,7 +83,7 @@ public sealed class ExcelUnlockCollector<TRow> : ICollector, IUnlockAware
     public string WhatGetsSent => info.WhatGetsSent;
 
     /// <inheritdoc/>
-    // Each collector recognises only its own sheet, so routing an unlock needs no lookup table and
+    // Each collector recognizes only its own sheet, so routing an unlock needs no lookup table and
     // no branch on category names. `Is<TRow>()` compares the row type the game reported against the
     // one this collector was built for.
     public bool Handles(RowRef rowRef) => rowRef.Is<TRow>();

@@ -172,6 +172,14 @@ Field constraints:
 - **Unknown `collections` keys are stripped and logged, never rejected** — a plugin newer
   than the server keeps working (payload evolution is additive-only). An older plugin simply
   omits keys, which is safe under monotonic writes.
+- **Ids the server's catalog does not recognize are ignored, never an error.** The
+  plugin is a dumb fact-reader and should send every id the game reports; the server's
+  catalog tables are deliberately pruned subsets (quests especially) and can trail the
+  game after a patch. Each category's ids are filtered against its catalog before
+  writing: unknown ids are dropped (and logged server-side), the known ids in the same
+  payload still write, and the upload succeeds. Nothing is lost — the plugin re-sends
+  everything on every sweep, so a dropped id lands as soon as the catalog imports it.
+  Dropped ids are simply absent from the `written` counts.
 - An **empty array carries no facts** and writes nothing (absence and emptiness are both "no
   information").
 - `fresh: false` means the count came from a cache rather than a live container read. The

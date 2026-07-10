@@ -115,6 +115,20 @@ internal sealed class SyncManager : IDisposable
     /// </remarks>
     private volatile int lastStatusCode = -1;
 
+    /// <summary>
+    /// Bumped on logout, so a response that arrives for a character who already left can be
+    /// recognized and discarded.
+    /// </summary>
+    /// <remarks>
+    /// A request in flight cannot be recalled: logout does not cancel it (only plugin unload does),
+    /// so its answer can land seconds later — and without this counter that late answer would write
+    /// status and halts for the <i>previous</i> character onto the next one's session. Same pattern
+    /// as <see cref="Windows.TokenVerifier"/>: the work captures the generation it was started for,
+    /// and an answer to a superseded generation is thrown away. Only the framework thread writes
+    /// this (single writer, so the non-atomic increment is safe); background tasks only read it.
+    /// </remarks>
+    private volatile int sessionGeneration;
+
     // The next three are WRITTEN only on the framework thread — from the Update handler and from the
     // Login/Logout/Unlock events, which Dalamud raises on that same thread. They therefore need no
     // synchronization between writers. (`identity` is additionally null-checked by the settings window
@@ -271,6 +285,20 @@ internal sealed class SyncManager : IDisposable
         identity = null;
         loginSettledAt = null;
         identityAttempts = 0;
+
+        // The "user must fix this" halt is released on logout, because its most common cause —
+        // this character is not claimed on the website — belongs to the character, and the
+        // character is leaving. Without this, logging into a properly-claimed character behind an
+        // unclaimed one inherits a halt that does not apply to it, and the login sync silently
+        // never fires. The token-shaped causes self-heal: a genuinely revoked token earns one 401
+        // from the next character's login sync (and one more if a /config poll happens to be due)
+        // and halts again — a request or two per relog, never a loop.
+        blockedPendingUserAction = false;
+
+        // Responses still in flight belong to the character who just left; bumping the generation
+        // makes them discard themselves when they land, instead of re-latching the halt (or a stale
+        // status line) onto whoever logs in next.
+        sessionGeneration++;
 
         // Skip reasons describe the session that just ended — the achievements list, for instance, is
         // unloaded on logout. Carrying them into the next character would show hints about a state
@@ -491,7 +519,11 @@ internal sealed class SyncManager : IDisposable
         // cancelled makes Task.Run skip the delegate entirely — so UploadAsync's `finally` would
         // never run, `uploadInFlight` would stay true, and syncing would be dead for the rest of the
         // session. Cancellation is instead observed inside UploadAsync, where the flag is cleared.
-        _ = Task.Run(() => UploadAsync(request, due.Trigger));
+        //
+        // The generation is captured here, once, so the task compares against the session it was
+        // started for rather than whatever the field holds when the response lands.
+        var startedFor = sessionGeneration;
+        _ = Task.Run(() => UploadAsync(request, due.Trigger, startedFor));
     }
 
     /// <summary>
@@ -550,13 +582,27 @@ internal sealed class SyncManager : IDisposable
     }
 
     /// <summary>Uploads off the framework thread, retrying once if the failure was transient.</summary>
-    private async Task UploadAsync(SyncRequest request, SyncTrigger trigger)
+    /// <param name="startedFor">The session generation this upload belongs to.</param>
+    private async Task UploadAsync(SyncRequest request, SyncTrigger trigger, int startedFor)
     {
         try
         {
             for (var attempt = 0; ; attempt++)
             {
                 var response = await apiClient.PostSyncAsync(request, lifetimeToken).ConfigureAwait(false);
+
+                // The character this answer is about may have logged out while it was in the air.
+                // Applying it would write the previous character's status — or worse, a halt — onto
+                // whoever is logged in now. The server already acted on the request (its writes are
+                // monotonic, so that is harmless); only the local bookkeeping is stale. Checked per
+                // iteration, so a logout during the retry delay is caught too. The one thing this
+                // can drop is a late 429's Retry-After, which costs at most one extra request that
+                // will receive its own.
+                if (startedFor != sessionGeneration)
+                {
+                    log.Debug($"Discarding a {trigger} sync response from a previous session.");
+                    return;
+                }
 
                 if (HandleResponse(response, trigger))
                     return;
@@ -650,10 +696,12 @@ internal sealed class SyncManager : IDisposable
 
         // Untokened for the same reason as the upload above: an already-cancelled token would make
         // Task.Run skip the delegate, stranding configPollInFlight at true.
-        _ = Task.Run(PollConfigAsync);
+        var startedFor = sessionGeneration;
+        _ = Task.Run(() => PollConfigAsync(startedFor));
     }
 
-    private async Task PollConfigAsync()
+    /// <param name="startedFor">The session generation this poll belongs to.</param>
+    private async Task PollConfigAsync(int startedFor)
     {
         try
         {
@@ -661,12 +709,17 @@ internal sealed class SyncManager : IDisposable
 
             if (response.IsSuccess)
             {
+                // Applied even when the session generation has moved on: the config describes the
+                // server and the token, not the character, so it is just as valid for whoever logs
+                // in next.
                 remoteConfig = response.Value;
                 scheduler.ApplyIntervals(response.Value!.Intervals);
                 return;
             }
 
-            if (RetryPolicy.RequiresUserAction(response.Status))
+            // The halt, by contrast, is scoped like the upload's: a failure that arrives after the
+            // character who caused it left must not halt the next one's session.
+            if (startedFor == sessionGeneration && RetryPolicy.RequiresUserAction(response.Status))
             {
                 blockedPendingUserAction = true;
                 log.Warning($"Config poll halted: {response.Status}. The user must resolve this.");

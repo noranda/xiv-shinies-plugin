@@ -55,7 +55,7 @@ public class CollectorSelectionTests
 
     // A key for a collection this build no longer ships must be ignored, never throw.
     [Fact]
-    public void An_unrecognised_category_matches_nothing_rather_than_throwing()
+    public void An_unrecognized_category_matches_nothing_rather_than_throwing()
     {
         var selected = CollectorSelection.For(Collectors(), new HashSet<string> {"triple_triad"});
 
