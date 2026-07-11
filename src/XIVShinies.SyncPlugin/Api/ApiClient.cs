@@ -261,15 +261,24 @@ public sealed class ApiClient : IDisposable
     /// </summary>
     /// <remarks>
     /// The Content-Length pre-check in the caller catches a server that tells the truth; this
-    /// catches one that lies or omits the header and just streams. Reading through a
-    /// length-capped stream means the bytes past the cap are never allocated.
+    /// catches one that lies or omits the header and just streams. The buffer is sized from the
+    /// advertised length when there is one — real responses are kilobytes, and allocating the
+    /// full multi-MiB cap for every request would churn the garbage collector for nothing — so
+    /// only a server that omits the header costs a cap-sized buffer, and bytes past the limit
+    /// are never stored.
     /// </remarks>
     private static async Task<string?> ReadBodyAsync(HttpContent content, CancellationToken token)
     {
         await using var stream = await content.ReadAsStreamAsync(token).ConfigureAwait(false);
 
-        // +1 so a body of exactly the cap reads whole, but the very first overflow byte trips it.
-        var buffer = new byte[MaxResponseBytes + 1];
+        // The advertised length is server-controlled, so it is clamped to the cap here even
+        // though the caller already refused anything advertising more — this helper stays safe
+        // on its own. No header at all falls back to the cap.
+        var limit = (int)Math.Min(content.Headers.ContentLength ?? MaxResponseBytes, MaxResponseBytes);
+
+        // +1 so a body of exactly the limit reads whole, but the very first byte past it — past
+        // the advertised length, or past the cap when nothing was advertised — trips the check.
+        var buffer = new byte[limit + 1];
         var total = 0;
         while (total < buffer.Length)
         {
@@ -282,7 +291,7 @@ public sealed class ApiClient : IDisposable
             total += read;
         }
 
-        if (total > MaxResponseBytes)
+        if (total > limit)
             return null;
 
         return Encoding.UTF8.GetString(buffer, 0, total);

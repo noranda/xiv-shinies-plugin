@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -398,5 +399,78 @@ public class ApiClientTests
         var response = await client.GetConfigAsync();
 
         Assert.Equal(TimeSpan.Zero, response.RetryAfter);
+    }
+
+    // Mirrors ApiClient.MaxResponseBytes (private there on purpose — the cap is an internal
+    // defense, not part of the public surface). Real responses are kilobytes; the cap exists so
+    // a hostile backend (the URL is user-overridable) cannot exhaust the game's memory.
+    private const int ResponseByteCap = 4 * 1024 * 1024;
+
+    // A response body that advertises no Content-Length and just streams — how a hostile or
+    // chunked-transfer server delivers a body the client cannot pre-check from the headers.
+    private sealed class UnadvertisedStreamingContent : HttpContent
+    {
+        private readonly int totalBytes;
+
+        public UnadvertisedStreamingContent(int totalBytes) => this.totalBytes = totalBytes;
+
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            // Written in transport-sized chunks, like a real socket would deliver it.
+            var chunk = new byte[81920];
+            var remaining = totalBytes;
+            while (remaining > 0)
+            {
+                var count = Math.Min(chunk.Length, remaining);
+                await stream.WriteAsync(chunk.AsMemory(0, count));
+                remaining -= count;
+            }
+        }
+
+        // Returning false is what omits the Content-Length header — the point of this stub.
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+    }
+
+    // An honest hostile server: the oversized body is advertised in the headers, so the client
+    // must refuse it there — before a single body byte is read into memory.
+    [Fact]
+    public async Task A_response_advertising_an_oversized_body_is_refused_from_its_headers()
+    {
+        var (client, _) = Build(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new MemoryStream(new byte[16])),
+            };
+            // A lying header is enough — the body itself stays tiny, proving the refusal came
+            // from the advertised length, not from reading.
+            response.Content.Headers.ContentLength = ResponseByteCap + 1L;
+            return response;
+        });
+
+        var response = await client.GetMeAsync();
+
+        Assert.Equal(ApiStatus.NetworkError, response.Status);
+        Assert.Equal(200, response.HttpStatusCode);
+    }
+
+    // A dishonest hostile server: no Content-Length at all, the body just streams past the cap.
+    // The capped read must stop and refuse it rather than buffering whatever arrives.
+    [Fact]
+    public async Task A_response_streaming_past_the_cap_without_a_length_is_refused()
+    {
+        var (client, _) = Build(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new UnadvertisedStreamingContent(ResponseByteCap + 16),
+        });
+
+        var response = await client.GetMeAsync();
+
+        Assert.Equal(ApiStatus.NetworkError, response.Status);
+        Assert.Equal(200, response.HttpStatusCode);
     }
 }
