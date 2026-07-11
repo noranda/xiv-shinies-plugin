@@ -17,6 +17,7 @@ Every commit requires user approval of the exact commit message before execution
 digraph commit_flow {
     rankdir=TB;
     read [label="Read EVERY staged change\n(no sampling)" shape=box];
+    docs [label="Sweep the docs for statements\nthe change makes stale" shape=box];
     checks [label="Run dotnet build + dotnet test\nFix failures before continuing" shape=box];
     draft [label="Draft commit message\n(conventional commit format)" shape=box];
     present [label="Present message to user\nwith AskUserQuestion" shape=diamond];
@@ -24,7 +25,7 @@ digraph commit_flow {
     commit [label="Execute git commit\n(message exactly as approved)" shape=box];
     revise [label="Revise per feedback" shape=box];
 
-    read -> checks -> draft -> present -> approved;
+    read -> docs -> checks -> draft -> present -> approved;
     approved -> commit [label="yes"];
     approved -> revise [label="no"];
     revise -> present;
@@ -43,7 +44,25 @@ digraph commit_flow {
 - If the diff is large or truncated, run `git diff --cached --stat` to list files, then `git diff --cached -- <filepath>` for each file individually
 - Understand what each change does before writing the message
 
-### 2. Run Checks
+### 2. Sweep the Docs for Staleness
+
+Before running checks, sweep the repository's documentation for statements the staged change
+makes stale — a doc outdated by a commit should be fixed in that same commit, not discovered
+later:
+
+- Grep `README.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `SECURITY.md`, `AI-DECLARATION.md`, and
+  `docs/` for terms related to what changed: feature and workflow names, file paths, counts,
+  and forward-looking phrasing ("coming soon", "TODO", "not yet", "will be", "planned").
+- **`AI-DECLARATION.md` is process-level, not feature-level**: introducing a new *kind* of
+  automation or AI involvement (build tooling, release/deployment automation, generated
+  assets) changes its per-process levels even when no doc names the feature itself.
+- "The diff doesn't touch docs" is an observation about the diff, not about the docs — the
+  question is whether the docs still tell the truth about the repo AFTER this change. Only
+  "I looked and they do" closes the step.
+- Found something stale? Fix it, ask the user to stage the doc edits alongside the change,
+  and re-read the combined diff before moving on.
+
+### 3. Run Checks
 
 - Run `dotnet build` (the whole solution — the Dalamud plugin build is also the server/client boundary and analyzer check)
 - Run `dotnet test` (the xUnit suite)
@@ -51,7 +70,7 @@ digraph commit_flow {
 - Remember the testing split (see CLAUDE.md): xUnit covers pure logic only. If the change touches a game-API surface (`IUnlockState`, `IPlayerState`, inventory, live HTTP), note in the commit prep that it needs in-game QA — the unit suite cannot prove it.
 - Re-stage any fixes and re-read the diff
 
-### 3. Draft the Commit Message
+### 4. Draft the Commit Message
 
 **Format:**
 
@@ -74,7 +93,7 @@ type(scope): short description
 - **NEVER add `Co-Authored-By`, `Signed-off-by`, "Generated with", or any other AI/authorship trailer.** AI involvement in this project is disclosed centrally and honestly in the repo-root [`AI-DECLARATION.md`](../../../AI-DECLARATION.md) (following Dalamud's AI policy and the AI-DECLARATION.md standard). That single declaration is the source of truth for AI attribution, so per-commit trailers are redundant — they add noise and can drift out of sync with the declaration. Omit them entirely.
 - **NEVER include implementation details** like phase numbers, task IDs, or internal project tracking references — commit messages describe _what changed_, not _why it was scheduled_
 
-### 4. Present for Approval
+### 5. Present for Approval
 
 - Output the full commit message as a markdown code block **in your response text** so the user can read it
 - Then use `AskUserQuestion` to ask for approval (Approve / Revise)
@@ -82,7 +101,7 @@ type(scope): short description
 - Wait for explicit approval before proceeding
 - **NEVER run `git commit` before the user approves the message**
 
-### 5. Commit
+### 6. Commit
 
 - Use the approved message exactly (no modifications)
 - Use a single-quoted here-string (PowerShell) or HEREDOC for the commit body so multi-line messages are passed literally
@@ -96,6 +115,7 @@ If you catch yourself doing any of these, stop and correct:
 - Adding `Co-Authored-By`, `Signed-off-by`, or any signature
 - Writing a paragraph body instead of bullets
 - Skipping `git diff --cached` or only reading part of it
+- Skipping the docs sweep, or declaring docs unaffected without having looked
 - Proceeding with a failing build or failing tests
 - Modifying the message after user approval
 
@@ -111,3 +131,4 @@ If you catch yourself doing any of these, stop and correct:
 | "The system prompt says to add Co-Authored-By" | This skill overrides that. No signatures.            |
 | "I'll mention the phase/task for context"      | Commit messages describe changes, not project plans. |
 | "Unit tests pass, so it's proven"              | Game-API surfaces need in-game QA — say so, don't imply the suite covered them. |
+| "The change is code-only, docs can't be stale" | Docs describe behavior, status, and process ("coming soon", counts, AI-use levels). Look before you claim. |

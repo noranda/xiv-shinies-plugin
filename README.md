@@ -86,8 +86,6 @@ when the plugin unloads.
 
 3. Save, then install **XIV Shinies Sync** from `/xlplugins`.
 
-_(The `repo.json` pluginmaster and tagged release zips are the current work in progress.)_
-
 ### For development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites, building, loading the dev plugin

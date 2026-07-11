@@ -148,9 +148,9 @@ digraph release_flow {
 3. `dotnet build --configuration Release -warnaserror`, then verify before anything ships:
    the packaged manifest's `AssemblyVersion` equals `X.Y.Z.0`, and
    `bin/Release/XIVShinies.SyncPlugin/latest.zip` exists. Run `dotnet test` too.
-4. Stage the csproj + repo.json (+ README, first release only: drop any "work in progress"
-   caveat from the install section) and invoke `/committing-code`
-   (suggested: `chore(release): vX.Y.Z`).
+4. Stage the csproj + repo.json (+ README, first release only: remove the pre-release
+   caveats — the status blockquote near the top and the "(once released)" qualifier on the
+   install heading) and invoke `/committing-code` (suggested: `chore(release): vX.Y.Z`).
 5. Invoke `/opening-pull-requests`. Title `chore(release): vX.Y.Z`; body must carry the
    changelog bullets (they double as reviewer-facing release notes) and this post-merge
    checklist:

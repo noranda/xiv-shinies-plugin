@@ -67,8 +67,8 @@ tests/XIVShinies.SyncPlugin.Tests/    xUnit — pure logic only
 
 The manifest's descriptive fields live in `XIVShinies.SyncPlugin.json`; the SDK merges in
 `AssemblyVersion` (from `<Version>` in the csproj), `InternalName` (assembly name), and
-`DalamudApiLevel` (from the SDK version) at build time. Bump `<Version>` for releases (the
-release workflow will automate this).
+`DalamudApiLevel` (from the SDK version) at build time. `<Version>` is bumped per release by
+the `/releasing` flow (see `.claude/skills/releasing/`), never by hand outside it.
 
 ## Build & test
 
