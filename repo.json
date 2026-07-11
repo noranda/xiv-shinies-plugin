@@ -1,0 +1,20 @@
+[
+  {
+    "Author": "Noranda",
+    "Name": "XIV Shinies Sync",
+    "InternalName": "XIVShinies.SyncPlugin",
+    "AssemblyVersion": "0.1.0.0",
+    "Description": "Automatically records your collection progress on XIV Shinies (https://xiv-shinies.com). New unlocks — quests, achievements, mounts, minions, and more — appear on the site within seconds, and everything else syncs automatically in the background. Fully opt-in: nothing uploads until you finish the short setup, and you choose exactly which collections to send. Use /shinies to get started.",
+    "Punchline": "Your collections, on xiv-shinies.com, the moment you earn them.",
+    "ApplicableVersion": "any",
+    "RepoUrl": "https://github.com/noranda/xiv-shinies-plugin",
+    "DalamudApiLevel": 15,
+    "Tags": ["collection", "sync", "quests", "achievements", "mounts", "minions", "relics"],
+    "CategoryTags": ["utility"],
+    "IconUrl": "https://raw.githubusercontent.com/noranda/xiv-shinies-plugin/main/src/XIVShinies.SyncPlugin/images/icon.png",
+    "ImageUrls": [],
+    "DownloadLinkInstall": "https://github.com/noranda/xiv-shinies-plugin/releases/download/v0.1.0/XIVShinies.SyncPlugin.zip",
+    "DownloadLinkUpdate": "https://github.com/noranda/xiv-shinies-plugin/releases/download/v0.1.0/XIVShinies.SyncPlugin.zip",
+    "DownloadLinkTesting": "https://github.com/noranda/xiv-shinies-plugin/releases/download/v0.1.0/XIVShinies.SyncPlugin.zip"
+  }
+]
