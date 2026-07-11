@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using XIVShinies.SyncPlugin.Api;
@@ -8,10 +9,19 @@ using XIVShinies.SyncPlugin.Collectors;
 
 namespace XIVShinies.SyncPlugin.Sync;
 
-/// <summary>One category's contribution to an upload: its wire key, and how many facts went out.</summary>
-// A "positional record": the parameter list declares two init-only properties (Key, Count) and a
-// constructor in one line — the C# shorthand for a tiny immutable data shape.
-public sealed record UploadLogCategory(string Key, int Count);
+/// <summary>
+/// One category's contribution to an upload: its wire key, how many facts went out, and a short
+/// content fingerprint.
+/// </summary>
+/// <remarks>
+/// The fingerprint exists because the count alone cannot see an exchange: trading one watched
+/// item for another leaves the count identical while the payload's contents change (a relic
+/// tool trade-in does exactly this). It is a hash of the facts, so the log still carries no
+/// ids — just enough to answer "did this category's contents change since last time?".
+/// </remarks>
+// A "positional record": the parameter list declares init-only properties and a constructor in
+// one line — the C# shorthand for a tiny immutable data shape.
+public sealed record UploadLogCategory(string Key, int Count, string Fingerprint = "");
 
 /// <summary>
 /// One upload, as shown in the settings window's upload log: when, why, what was sent, and how
@@ -86,7 +96,7 @@ public sealed record UploadLogEntry
     {
         var categories = new List<UploadLogCategory>(snapshot.Collections.Count);
         foreach (var (key, facts) in snapshot.Collections)
-            categories.Add(new UploadLogCategory(key, CountFacts(facts)));
+            categories.Add(new UploadLogCategory(key, CountFacts(facts), Fingerprint(facts)));
 
         return new UploadLogEntry
         {
@@ -105,6 +115,21 @@ public sealed record UploadLogEntry
     /// </summary>
     private static int CountFacts(JsonNode facts) =>
         facts is JsonArray array ? array.Count : 1;
+
+    /// <summary>
+    /// A short, deterministic hash of a category's facts. Collectors build their facts in a
+    /// stable order (game sheets and the manifest are iterated in order), so identical contents
+    /// always hash identically — and any change, even one that leaves the count the same,
+    /// changes the hash.
+    /// </summary>
+    private static string Fingerprint(JsonNode facts)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(facts.ToJsonString()));
+
+        // Eight hex characters: not a security boundary, just a change detector — 32 bits is
+        // plenty to make an accidental collision between two consecutive uploads implausible.
+        return Convert.ToHexString(bytes, 0, 4).ToLowerInvariant();
+    }
 }
 
 /// <summary>
@@ -172,8 +197,9 @@ public sealed class UploadLog
 public static class UploadLogDiff
 {
     /// <summary>
-    /// The category keys in <c>newestFirst[index]</c> whose count differs from that category's
-    /// most recent earlier appearance in the log.
+    /// The category keys in <c>newestFirst[index]</c> whose contents differ from that category's
+    /// most recent earlier appearance in the log — a different count, or the same count with a
+    /// different fingerprint (one watched item traded for another, say).
     /// </summary>
     /// <remarks>
     /// The baseline is the nearest OLDER entry that mentions the category, not simply the
@@ -190,9 +216,10 @@ public static class UploadLogDiff
         foreach (var category in newestFirst[index].Categories)
         {
             // `is { } baseline` is a null test and an unwrap in one: the branch runs only when a
-            // baseline exists, with `baseline` as the plain int inside the nullable.
-            if (BaselineCount(newestFirst, index, category.Key) is { } baseline
-                && baseline != category.Count)
+            // baseline exists, with `baseline` as the record inside the nullable.
+            if (Baseline(newestFirst, index, category.Key) is { } baseline
+                && (baseline.Count != category.Count
+                    || baseline.Fingerprint != category.Fingerprint))
             {
                 changed.Add(category.Key);
             }
@@ -202,10 +229,10 @@ public static class UploadLogDiff
     }
 
     /// <summary>
-    /// The category's count in the nearest entry older than <paramref name="index"/> that
-    /// mentions it, or null when no older entry does.
+    /// The category's entry in the nearest log row older than <paramref name="index"/> that
+    /// mentions it, or null when no older row does.
     /// </summary>
-    private static int? BaselineCount(
+    private static UploadLogCategory? Baseline(
         IReadOnlyList<UploadLogEntry> newestFirst, int index, string categoryKey)
     {
         for (var older = index + 1; older < newestFirst.Count; older++)
@@ -213,7 +240,7 @@ public static class UploadLogDiff
             foreach (var baseline in newestFirst[older].Categories)
             {
                 if (baseline.Key == categoryKey)
-                    return baseline.Count;
+                    return baseline;
             }
         }
 
@@ -322,8 +349,10 @@ public static class UploadLogText
         // server" is a classic support case that is otherwise invisible in a pasted log.
         text.AppendLine($"XIV Shinies Sync v{pluginVersion} upload log — backend: {backendUrl}");
 
-        foreach (var entry in entries)
+        for (var index = 0; index < entries.Count; index++)
         {
+            var entry = entries[index];
+
             text.Append(entry.At.UtcDateTime.ToString(
                 "yyyy-MM-dd HH:mm:ss'Z'", CultureInfo.InvariantCulture));
             text.Append(" | ").Append(entry.Trigger);
@@ -338,6 +367,17 @@ public static class UploadLogText
                 text.Append(" | skipped:");
                 foreach (var (key, reason) in entry.Skipped)
                     text.Append(' ').Append(key).Append('=').Append(reason);
+            }
+
+            // The same fact the window's gold highlight shows, in text: which categories'
+            // contents differ from their previous appearance. Counts alone cannot carry this —
+            // a one-for-one item swap keeps the count identical.
+            var changed = UploadLogDiff.ChangedCategories(entries, index);
+            if (changed.Count > 0)
+            {
+                text.Append(" | changed:");
+                foreach (var key in changed)
+                    text.Append(' ').Append(key);
             }
 
             // Diagnostics, only when they say something: a clean first-try success stays a clean

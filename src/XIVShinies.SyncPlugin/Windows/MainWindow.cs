@@ -915,6 +915,14 @@ internal sealed class MainWindow : Window, IDisposable
             ImGui.SameLine();
             ImGui.TextUnformatted($"{character.Name} ({character.World})");
         }
+
+        // The list is a snapshot from the last probe, and nothing about it says so — a user who
+        // just claimed an alt on the website would otherwise stare at a list that looks live and
+        // never guess that Verify doubles as refresh.
+        ImGui.Dummy(new Vector2(0f, 8f * ImGuiHelpers.GlobalScale));
+        DrawWrapped(
+            "Claimed a new character on xiv-shinies.com? Press Verify to refresh this list.",
+            ImGuiCol.TextDisabled);
     }
 
     private void DrawChooseCategoriesStep()
@@ -1276,7 +1284,9 @@ internal sealed class MainWindow : Window, IDisposable
                 DrawWrapped(detail, ImGuiCol.TextDisabled);
 
             // Mixed colors inside one flowing line need the span helper, exactly like the
-            // wizard intro's gold website name.
+            // wizard intro's gold website name. A changed category says so in words as well as
+            // gold: the color alone is subtle, and "the count is the same but the contents
+            // differ" (an item traded for another) is invisible without it.
             ImGui.TableNextColumn();
             var sent = new List<(string Text, Vector4? Color)>(entry.Categories.Count * 2);
             foreach (var category in entry.Categories)
@@ -1284,9 +1294,11 @@ internal sealed class MainWindow : Window, IDisposable
                 if (sent.Count > 0)
                     sent.Add(("·", muted));
 
+                var isChanged = changed.Contains(category.Key);
                 sent.Add((
-                    $"{DisplayNameFor(category.Key)} {category.Count:N0}",
-                    changed.Contains(category.Key) ? Brand.Gold : muted));
+                    $"{DisplayNameFor(category.Key)} {category.Count:N0}"
+                    + (isChanged ? " (changed)" : string.Empty),
+                    isChanged ? Brand.Gold : muted));
             }
 
             DrawWrappedSpans(sent.ToArray());

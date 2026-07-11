@@ -196,8 +196,66 @@ public class UploadLogTests
     }
 
     // --- Change highlighting ----------------------------------------------------------------
-    // The window paints a category gold when its count differs from the last time the log saw
-    // it — the "you just got something new" signal. The comparison rule is pinned here.
+    // The window paints a category gold when what was sent differs from the last time the log
+    // saw it — the "you just got something new" signal. Both the count and a content
+    // fingerprint are compared: trading one watched item for another keeps the count identical
+    // while the contents change (observed live with a relic tool trade-in), and the highlight
+    // must fire for that too. The comparison rules are pinned here.
+
+    [Fact]
+    public void Draft_fingerprints_each_category_by_content_not_count()
+    {
+        var before = UploadLogEntry.Draft(
+            DateTimeOffset.UnixEpoch, SyncTrigger.Manual,
+            SnapshotWith(collections: new Dictionary<string, JsonNode>
+            {
+                ["items"] = JsonNode.Parse("""[{"id":1,"count":1},{"id":2,"count":1}]""")!,
+            }));
+        var after = UploadLogEntry.Draft(
+            DateTimeOffset.UnixEpoch, SyncTrigger.Manual,
+            SnapshotWith(collections: new Dictionary<string, JsonNode>
+            {
+                ["items"] = JsonNode.Parse("""[{"id":1,"count":1},{"id":3,"count":1}]""")!,
+            }));
+
+        // Same count, different contents — the fingerprints must differ.
+        Assert.Equal(before.Categories[0].Count, after.Categories[0].Count);
+        Assert.NotEqual(before.Categories[0].Fingerprint, after.Categories[0].Fingerprint);
+    }
+
+    [Fact]
+    public void Identical_facts_produce_identical_fingerprints()
+    {
+        JsonNode Facts() => JsonNode.Parse("[1,2,3]")!;
+
+        var first = UploadLogEntry.Draft(
+            DateTimeOffset.UnixEpoch, SyncTrigger.Manual,
+            SnapshotWith(collections: new Dictionary<string, JsonNode> { ["quests"] = Facts() }));
+        var second = UploadLogEntry.Draft(
+            DateTimeOffset.UnixEpoch, SyncTrigger.Manual,
+            SnapshotWith(collections: new Dictionary<string, JsonNode> { ["quests"] = Facts() }));
+
+        Assert.Equal(first.Categories[0].Fingerprint, second.Categories[0].Fingerprint);
+    }
+
+    // The trade-in case: count unchanged, contents swapped — must still flag as changed.
+    [Fact]
+    public void A_same_count_content_swap_is_flagged_as_changed()
+    {
+        var newestFirst = new[]
+        {
+            SomeEntry() with
+            {
+                Categories = new[] { new UploadLogCategory("items", 52, "aaaa1111") },
+            },
+            SomeEntry() with
+            {
+                Categories = new[] { new UploadLogCategory("items", 52, "bbbb2222") },
+            },
+        };
+
+        Assert.Contains("items", UploadLogDiff.ChangedCategories(newestFirst, 0));
+    }
 
     private static UploadLogEntry EntryWith(params (string Key, int Count)[] categories)
     {
@@ -408,6 +466,31 @@ public class UploadLogTests
         Assert.DoesNotContain("http:", text);
         Assert.DoesNotContain("manifest:", text);
         Assert.DoesNotContain("issues:", text);
+    }
+
+    // The gold changed-highlight is invisible in a paste, so the dump carries the same fact as
+    // a segment: which categories' contents differ from their previous appearance.
+    [Fact]
+    public void Clipboard_text_marks_categories_whose_contents_changed()
+    {
+        var newestFirst = new[]
+        {
+            SomeEntry() with
+            {
+                Categories = new[] { new UploadLogCategory("items", 52, "bbbb2222") },
+            },
+            SomeEntry() with
+            {
+                Categories = new[] { new UploadLogCategory("items", 52, "aaaa1111") },
+            },
+        };
+
+        var text = UploadLogText.ClipboardText("1.2.3", "https://xiv-shinies.com", newestFirst);
+        var lines = text.Split('\n');
+
+        // Newest line (right after the header) is marked; the baseline line is not.
+        Assert.Contains("| changed: items", lines[1]);
+        Assert.DoesNotContain("changed:", lines[2]);
     }
 
     [Fact]
