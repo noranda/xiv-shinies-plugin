@@ -67,8 +67,8 @@ tests/XIVShinies.SyncPlugin.Tests/    xUnit — pure logic only
 
 The manifest's descriptive fields live in `XIVShinies.SyncPlugin.json`; the SDK merges in
 `AssemblyVersion` (from `<Version>` in the csproj), `InternalName` (assembly name), and
-`DalamudApiLevel` (from the SDK version) at build time. Bump `<Version>` for releases (the
-release workflow will automate this).
+`DalamudApiLevel` (from the SDK version) at build time. `<Version>` is bumped per release by
+the `/releasing` flow (see `.claude/skills/releasing/`), never by hand outside it.
 
 ## Build & test
 
@@ -187,12 +187,15 @@ Project-scoped skills live in `.claude/skills/`:
   conformance, Dalamud compliance, comment quality, and test coverage.
 - **learning-summary** — the two-part learning-summary format (see the working-style rules
   at the top of this file).
-- **releasing** — TODO (author once the release flow exists: `<Version>` bump,
-  `repo.json`/pluginmaster update, DalamudPackager GitHub-release zip). Official-repo
-  submission (later) also needs an `images/icon.png` (1:1, 64–512px, PNG — hand-made, **not**
-  AI-generated, per Dalamud's AI policy), a `manifest.toml` placed under `testing/live/` in
-  DalamudPluginsD17 (new plugins start on the testing track), one plugin per PR, and the
-  AI-use level (**copilot**) disclosed in that PR's description.
+- **releasing** — two-phase release flow (changelog entry → version/repo.json release PR,
+  each gated on user approval), then a `vX.Y.Z` tag pushed to `main` after the squash merge;
+  the tag-triggered Release workflow verifies every version surface agrees and publishes the
+  GitHub Release that `repo.json` points at. Releases are never built or published from a
+  developer machine. Official-repo submission (later) still needs a `manifest.toml` placed
+  under `testing/live/` in DalamudPluginsD17 (new plugins start on the testing track), one
+  plugin per PR, and the AI-use level (**copilot**) disclosed in that PR's description; the
+  required `images/icon.png` (1:1, 64–512px, hand-made — **not** AI-generated, per Dalamud's
+  AI policy) already ships in the repo.
 
 **Never commit without the user's express approval.** Never add `Co-Authored-By`,
 `Signed-off-by`, "Generated with", or any AI/authorship signature to commits or PRs — AI

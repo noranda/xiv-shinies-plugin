@@ -1,0 +1,126 @@
+# Release: turns a pushed version tag (v1.2.3) into a published GitHub Release carrying the
+# DalamudPackager zip that repo.json points at.
+#
+# Division of labor (deliberate, and different from many plugin repos): this workflow NEVER
+# writes to the repository. The release PR — authored by the /releasing skill — already bumped
+# the csproj <Version>, updated repo.json to the new version's asset URL, and added the
+# CHANGELOG.md section, all reviewed before merge. Pushing the tag afterwards only triggers the
+# packaging and publishing below. Keeping CI read-only means main's branch protection needs no
+# bypass actors, and every released byte traces to a reviewed commit.
+#
+# The "verify" step is the safety interlock: if someone tags a commit whose sources do not
+# agree with the tag (e.g. tagging without the release PR, or a typo'd tag), the run fails
+# before anything is published, and the tag can be deleted and re-pushed correctly.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    # The plugin targets net10.0-windows, so it must build on a Windows runner.
+    runs-on: windows-2022
+
+    permissions:
+      # The default GITHUB_TOKEN is repo-wide read-only (a deliberate repo setting); creating
+      # the GitHub Release needs this one write scope, granted to this job only.
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Everything below runs in PowerShell (the Windows runner default). The tag name arrives
+      # as GITHUB_REF_NAME, e.g. "v0.1.0".
+      - name: Verify the tag matches the source
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Tag '$tag' is not a release tag (expected vMAJOR.MINOR.PATCH)."
+          }
+          $version = $tag.TrimStart('v')
+
+          # The csproj <Version> is the single source the SDK derives the packaged manifest's
+          # AssemblyVersion from — the tag must agree with it.
+          [xml]$project = Get-Content src/XIVShinies.SyncPlugin/XIVShinies.SyncPlugin.csproj
+          $csprojVersion = $project.SelectSingleNode('//Version').InnerText
+          if ($csprojVersion -ne $version) {
+            throw "Tag $tag does not match csproj <Version> $csprojVersion. Tag the merged release PR, or fix the tag."
+          }
+
+          # repo.json is what installed clients poll for updates; its version and download URL
+          # must reference exactly this tag, or clients would be offered a broken update.
+          $repo = Get-Content repo.json -Raw | ConvertFrom-Json
+          $entry = $repo[0]
+          if ($entry.AssemblyVersion -ne "$version.0") {
+            throw "repo.json AssemblyVersion $($entry.AssemblyVersion) does not match tag $tag (expected $version.0)."
+          }
+          foreach ($link in @($entry.DownloadLinkInstall, $entry.DownloadLinkUpdate, $entry.DownloadLinkTesting)) {
+            if ($link -notlike "*/download/$tag/*") {
+              throw "repo.json download link '$link' does not point at the $tag release asset."
+            }
+          }
+
+          # The release notes are the CHANGELOG's top section; a missing section means the
+          # release PR was incomplete.
+          $heading = Select-String -Path CHANGELOG.md -Pattern "^## $([regex]::Escape($tag)) " | Select-Object -First 1
+          if ($null -eq $heading) {
+            throw "CHANGELOG.md has no '## $tag' section; the release PR should have added one."
+          }
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      # Same stand-in for XIVLauncher as build.yml — see the comments there.
+      - name: Download Dalamud dev libraries
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
+          Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+
+      - name: Build
+        run: dotnet build --configuration Release -warnaserror
+
+      - name: Test
+        run: dotnet test --configuration Release --no-build
+
+      # Belt and braces after the source-level check: confirm the manifest that actually ships
+      # inside the zip carries the version this tag promises.
+      - name: Verify the packaged manifest
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $manifest = Get-Content src/XIVShinies.SyncPlugin/bin/Release/XIVShinies.SyncPlugin/XIVShinies.SyncPlugin.json -Raw | ConvertFrom-Json
+          if ($manifest.AssemblyVersion -ne "$version.0") {
+            throw "Packaged manifest AssemblyVersion $($manifest.AssemblyVersion) does not match tag (expected $version.0)."
+          }
+
+      # The release notes are the CHANGELOG's top section, copied verbatim (from below the
+      # heading to the next version heading).
+      - name: Extract release notes
+        run: |
+          $lines = Get-Content CHANGELOG.md
+          # Select-String line numbers are 1-based, so $start is already the 0-based index of
+          # the first line AFTER the version heading.
+          $start = ($lines | Select-String -Pattern '^## ' | Select-Object -First 1).LineNumber
+          if ($start -ge $lines.Count) {
+            throw 'The top CHANGELOG section is empty; nothing to publish as release notes.'
+          }
+          $rest = $lines[$start..($lines.Count - 1)]
+          $nextHeading = ($rest | Select-String -Pattern '^## ' | Select-Object -First 1)
+          $end = if ($null -ne $nextHeading) { $start + $nextHeading.LineNumber - 2 } else { $lines.Count - 1 }
+          Set-Content -Path "$env:RUNNER_TEMP/release-notes.md" -Value $lines[$start..$end] -Encoding utf8
+
+      # The zip DalamudPackager emitted is attached under a stable, self-describing name — the
+      # exact URL repo.json advertises: releases/download/<tag>/XIVShinies.SyncPlugin.zip.
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          Copy-Item src/XIVShinies.SyncPlugin/bin/Release/XIVShinies.SyncPlugin/latest.zip XIVShinies.SyncPlugin.zip
+          gh release create $env:GITHUB_REF_NAME XIVShinies.SyncPlugin.zip `
+            --title "XIV Shinies Sync $env:GITHUB_REF_NAME" `
+            --notes-file "$env:RUNNER_TEMP/release-notes.md" `
+            --verify-tag

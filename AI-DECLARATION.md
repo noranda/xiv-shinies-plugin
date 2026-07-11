@@ -60,7 +60,11 @@ development honest and safe here:
   them for accuracy and clarity.
 - **review: assist** — I am the final reviewer of all changes (central to the learning
   goal); the AI assists with review passes but does not have the final say.
-- **deployment: none** — No release automation exists yet. This will be updated when a
-  release/publishing flow is added.
+- **deployment: copilot** — The AI authored the release automation (the tag-triggered
+  GitHub Actions workflow that packages and publishes releases, and the gated release
+  process it enforces), with me reviewing and approving. Every release itself is
+  human-driven: I approve the changelog and version bump, merge the release PR, and push
+  the tag; CI only verifies and publishes what I approved. Nothing releases without my
+  explicit action.
 
 This declaration will be kept current as the project evolves.
