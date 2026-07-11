@@ -185,13 +185,14 @@ internal sealed class MainWindow : Window, IDisposable
         //
         // The opening size is computed in OnOpen and applied under FirstUseEver: ImGui uses it only
         // when it has no remembered size for this window; after that the user's own resize wins and
-        // persists. MinimumSize is only a floor against squishing the window into uselessness — a
-        // minimum clamps UP, so an ambitious one would override the size the user chose.
+        // persists. MinimumSize is a real design floor (a minimum clamps UP): the width matches the
+        // preferred opening width, below which the header rows and the upload table stop being
+        // worth reading.
         SizeCondition = ImGuiCond.FirstUseEver;
 
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(360, 240),
+            MinimumSize = new Vector2(560, 360),
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
         };
 
@@ -492,17 +493,12 @@ internal sealed class MainWindow : Window, IDisposable
             previousInnerRight = owner.activeCardInnerRight;
             owner.activeCardInnerRight = innerRightLocal;
 
+            // The same header treatment as the cards that compose their own rows — one source
+            // for the icon gap, the divider, and the spacing.
             if (icon is { } cardIcon && title is not null)
             {
-                owner.DrawIcon(cardIcon, Brand.Teal);
-                ImGui.SameLine();
-                ImGui.TextColored(Brand.Teal, title);
-
-                // Air, then a divider under the title, matching the cards that draw their own
-                // custom header rows — every titled card gets the same treatment.
-                ImGui.Dummy(new Vector2(0f, 6f * ImGuiHelpers.GlobalScale));
-                owner.BrandSeparator();
-                ImGui.Spacing();
+                owner.DrawCardTitle(cardIcon, title);
+                owner.CloseCardHeader();
             }
         }
 
@@ -1162,6 +1158,43 @@ internal sealed class MainWindow : Window, IDisposable
 
     private void DrawUploadLogTableRows(IReadOnlyList<UploadLogEntry> history, float innerRight)
     {
+        // The metadata columns adapt to the room available: on a roomy table, When and Trigger
+        // each render on one line; on a narrow one, the date stacks over the time and the
+        // trigger stacks word by word. The stacking is explicit lines, never ImGui text
+        // wrapping — a wrap would happily break inside "7/11/2026" or "login" the moment the
+        // column got narrower than the word. Both candidate widths are measured from the rows
+        // actually shown, so the columns are always exactly as wide as their widest line.
+        // Seeded with the header labels: a column exactly as wide as "login" clips its own
+        // "Trigger" heading.
+        var whenOneLine = ImGui.CalcTextSize("When").X;
+        var whenStacked = whenOneLine;
+        var triggerOneLine = ImGui.CalcTextSize("Trigger").X;
+        var triggerStacked = triggerOneLine;
+        foreach (var entry in history)
+        {
+            // "d"/"t" are the short date and short time in the user's own locale.
+            var at = entry.At.ToLocalTime();
+            var date = at.ToString("d");
+            var time = at.ToString("t");
+            whenOneLine = Math.Max(whenOneLine, ImGui.CalcTextSize($"{date} {time}").X);
+            whenStacked = Math.Max(
+                whenStacked, Math.Max(ImGui.CalcTextSize(date).X, ImGui.CalcTextSize(time).X));
+
+            var trigger = UploadLogText.TriggerText(entry.Trigger);
+            triggerOneLine = Math.Max(triggerOneLine, ImGui.CalcTextSize(trigger).X);
+            foreach (var word in trigger.Split(' '))
+                triggerStacked = Math.Max(triggerStacked, ImGui.CalcTextSize(word).X);
+        }
+
+        // Compact when one-line metadata would leave too little room for Outcome and Sent.
+        var tableWidth = innerRight - ImGui.GetCursorPosX();
+        var compact =
+            tableWidth < whenOneLine + triggerOneLine + (360f * ImGuiHelpers.GlobalScale);
+
+        var whenWidth = (compact ? whenStacked : whenOneLine) + (2f * ImGuiHelpers.GlobalScale);
+        var triggerWidth =
+            (compact ? triggerStacked : triggerOneLine) + (2f * ImGuiHelpers.GlobalScale);
+
         // Roomier cells than ImGui's default: CellPadding is the gap between a cell's border and
         // its content, pushed as a style variable scoped to this table.
         using var cellPadding = ImRaii.PushStyle(
@@ -1180,10 +1213,14 @@ internal sealed class MainWindow : Window, IDisposable
         if (!table.Success)
             return;
 
-        ImGui.TableSetupColumn("When", ImGuiTableColumnFlags.WidthFixed);
-        ImGui.TableSetupColumn("Trigger", ImGuiTableColumnFlags.WidthFixed);
-        ImGui.TableSetupColumn("Outcome", ImGuiTableColumnFlags.WidthStretch, 1f);
-        ImGui.TableSetupColumn("Sent", ImGuiTableColumnFlags.WidthStretch, 2f);
+        // Metadata columns fixed at their measured width (one-line or stacked, chosen above);
+        // Outcome and Sent stretch over whatever remains. Sent gets the lion's share: Outcome's
+        // usual content is one short word, and the long failure phrases can wrap — the
+        // per-category counts are the dense part.
+        ImGui.TableSetupColumn("When", ImGuiTableColumnFlags.WidthFixed, whenWidth);
+        ImGui.TableSetupColumn("Trigger", ImGuiTableColumnFlags.WidthFixed, triggerWidth);
+        ImGui.TableSetupColumn("Outcome", ImGuiTableColumnFlags.WidthStretch, 0.8f);
+        ImGui.TableSetupColumn("Sent", ImGuiTableColumnFlags.WidthStretch, 2.2f);
         ImGui.TableHeadersRow();
 
         var muted = ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled];
@@ -1198,12 +1235,31 @@ internal sealed class MainWindow : Window, IDisposable
 
             ImGui.TableNextRow();
 
-            // "g" is the short date + short time in the user's own locale.
+            // Short date + short time in the user's own locale — one line, or the date stacked
+            // over the time in compact mode. Explicit lines: neither piece can ever be broken.
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(entry.At.ToLocalTime().ToString("g"));
+            var at = entry.At.ToLocalTime();
+            if (compact)
+            {
+                ImGui.TextUnformatted(at.ToString("d"));
+                ImGui.TextUnformatted(at.ToString("t"));
+            }
+            else
+            {
+                ImGui.TextUnformatted($"{at.ToString("d")} {at.ToString("t")}");
+            }
 
             ImGui.TableNextColumn();
-            ImGui.TextDisabled(UploadLogText.TriggerText(entry.Trigger));
+            var triggerText = UploadLogText.TriggerText(entry.Trigger);
+            if (compact)
+            {
+                foreach (var word in triggerText.Split(' '))
+                    ImGui.TextDisabled(word);
+            }
+            else
+            {
+                ImGui.TextDisabled(triggerText);
+            }
 
             // The outcome (plus retry/attempt qualifiers) in a color that matches it: green for
             // accepted, muted for self-healing deferrals, red for anything the user must look

@@ -75,6 +75,12 @@ internal sealed class SyncManager : IDisposable
     // log. In memory only; see UploadLog for why it is deliberately not persisted.
     private readonly UploadLog uploadLog = new();
 
+    // True once the FIRST /config poll of this plugin load has answered, successfully or not.
+    // Sweeps are held until then (see DispatchDueWork): the item manifest lives only in memory,
+    // so without the hold the session's first sweep races the fetch and runs manifest-less.
+    // Volatile: written by the poll task, read by the framework tick.
+    private volatile bool firstConfigAnswerSeen;
+
     /// <summary>
     /// Cancelled on unload, so an upload in flight when the plugin is torn down stops rather than
     /// completing against disposed state.
@@ -424,6 +430,17 @@ internal sealed class SyncManager : IDisposable
         PollConfigIfDue(now);
 
         CaptureIdentityIfSettled(now);
+
+        // Hold sweeps until the first config poll of this load has ANSWERED, one way or the
+        // other. Without this, the first sweep dispatches on the same tick the fetch starts and
+        // collects with no item manifest — skipping the items category and leaving a scary
+        // "waiting for XIV Shinies" hint on the settings screen until the next sweep, minutes
+        // later. Success populates the manifest; failure lets syncing proceed anyway (the skip
+        // hint then describes a server we genuinely could not reach). The scheduler keeps the
+        // queued trigger, so the held sweep dispatches on the first tick after the answer —
+        // the cost is one config round trip before the session's first upload.
+        if (remoteConfig is null && !firstConfigAnswerSeen)
+            return;
 
         if (identity is null || uploadInFlight)
             return;
@@ -833,6 +850,11 @@ internal sealed class SyncManager : IDisposable
         finally
         {
             configPollInFlight = false;
+
+            // Any answer — success, failure, even cancellation at unload — releases the
+            // first-sweep hold. A failed poll must unblock syncing rather than strand it: the
+            // upload itself will surface whatever is actually wrong with the server.
+            firstConfigAnswerSeen = true;
         }
     }
 }
