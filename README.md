@@ -67,8 +67,9 @@ as a whole — can be toggled at any time from the settings window (`/shinies`).
 
 The settings window keeps a **Recent uploads** log: every upload's time, trigger, outcome, and
 per-category counts, with changes since the previous upload highlighted. **Copy log** puts a
-plain-text version on your clipboard for bug reports — it carries counts and outcomes only,
-never IDs or character identity. The log lives in memory and clears when the plugin unloads.
+plain-text version on your clipboard for bug reports — it carries counts, outcomes, and
+failure diagnostics only, never IDs or character identity. The log lives in memory and clears
+when the plugin unloads.
 
 ![The Recent uploads log: per-upload counts, outcomes, and change highlights](images/screenshots/settings-5-uploads.png)
 

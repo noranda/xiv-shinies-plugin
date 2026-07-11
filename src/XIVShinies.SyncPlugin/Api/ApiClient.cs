@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -34,6 +35,17 @@ public sealed class ApiClient : IDisposable
 {
     // Every endpoint hangs off this prefix.
     private const string ApiPrefix = "api/plugin/v1";
+
+    // The largest response body we will read. Real responses are kilobytes; this ceiling exists
+    // only to stop a hostile or broken backend (the URL is user-overridable) from streaming a
+    // huge body that exhausts the game process's memory. 4 MiB is comfortably above any legitimate
+    // config or sync response and well below anything dangerous.
+    private const long MaxResponseBytes = 4 * 1024 * 1024;
+
+    // The longest server-requested backoff we will honor. Retry-After is server-controlled, and a
+    // hostile 429/503 could otherwise silence syncing for the rest of the session (backoff
+    // deliberately survives logout). Clamped to a day, matching the full-sync interval ceiling.
+    private static readonly TimeSpan MaxRetryAfter = TimeSpan.FromHours(24);
 
     // A single HttpClient reused for every request. Creating one per call exhausts sockets — this
     // is the single most common misuse of HttpClient in .NET.
@@ -180,12 +192,28 @@ public sealed class ApiClient : IDisposable
             request.Content = content;
 
             // ConfigureAwait(false) says "resume on any thread; I don't need the original context".
-            // It is the right default for library code and keeps us off the framework thread.
-            using var response = await http.SendAsync(request, linked.Token).ConfigureAwait(false);
+            // HttpCompletionOption.ResponseHeadersRead returns as soon as the headers arrive,
+            // before the body is buffered — so the Content-Length check below can reject an
+            // oversized response before a single byte of its body is read into memory.
+            using var response = await http
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token)
+                .ConfigureAwait(false);
 
             var rawCode = (int)response.StatusCode;
             var status = ApiStatusMap.FromHttpStatusCode(rawCode);
-            var body = await response.Content.ReadAsStringAsync(linked.Token).ConfigureAwait(false);
+
+            // The backend URL is user-overridable, so a hostile or broken backend is in scope: a
+            // multi-hundred-megabyte body read into a string would exhaust memory and take the
+            // GAME process down, not just the plugin. Our real responses are kilobytes. Refuse
+            // anything implausibly large — both the advertised length and, for a server that lies
+            // about or omits it, the actual bytes read (see ReadBodyAsync). Reported as a network
+            // error, the same as any other unusable response.
+            if (response.Content.Headers.ContentLength > MaxResponseBytes)
+                return new ApiResponse<T> { Status = ApiStatus.NetworkError, HttpStatusCode = rawCode };
+
+            var body = await ReadBodyAsync(response.Content, linked.Token).ConfigureAwait(false);
+            if (body is null)
+                return new ApiResponse<T> { Status = ApiStatus.NetworkError, HttpStatusCode = rawCode };
 
             if (status == ApiStatus.Ok)
             {
@@ -227,13 +255,49 @@ public sealed class ApiClient : IDisposable
     }
 
     /// <summary>
+    /// Reads a response body as a string, but never more than <see cref="MaxResponseBytes"/> —
+    /// returning null (an unusable response) if the server exceeds that, whether or not it
+    /// advertised an honest <c>Content-Length</c>.
+    /// </summary>
+    /// <remarks>
+    /// The Content-Length pre-check in the caller catches a server that tells the truth; this
+    /// catches one that lies or omits the header and just streams. Reading through a
+    /// length-capped stream means the bytes past the cap are never allocated.
+    /// </remarks>
+    private static async Task<string?> ReadBodyAsync(HttpContent content, CancellationToken token)
+    {
+        await using var stream = await content.ReadAsStreamAsync(token).ConfigureAwait(false);
+
+        // +1 so a body of exactly the cap reads whole, but the very first overflow byte trips it.
+        var buffer = new byte[MaxResponseBytes + 1];
+        var total = 0;
+        while (total < buffer.Length)
+        {
+            var read = await stream
+                .ReadAsync(buffer.AsMemory(total), token)
+                .ConfigureAwait(false);
+            if (read == 0)
+                break;
+
+            total += read;
+        }
+
+        if (total > MaxResponseBytes)
+            return null;
+
+        return Encoding.UTF8.GetString(buffer, 0, total);
+    }
+
+    /// <summary>
     /// Reads how long the server asked us to wait, from its <c>Retry-After</c> header.
     /// </summary>
     /// <remarks>
     /// The header comes in two legal forms: a delta in whole seconds, or an absolute HTTP-date.
     /// Our server sends seconds, but a proxy or CDN in between may rewrite it to a date — so read
     /// both, or a 429/503 would silently lose its backoff. Never returns a negative wait: a date
-    /// already in the past means "you may retry now".
+    /// already in the past means "you may retry now". Clamped to <see cref="MaxRetryAfter"/>,
+    /// because the header is server-controlled and an unbounded backoff would let a hostile
+    /// backend mute syncing indefinitely — the same reason the config intervals are clamped.
     /// </remarks>
     private static TimeSpan? ReadRetryAfter(HttpResponseMessage response)
     {
@@ -243,15 +307,17 @@ public sealed class ApiClient : IDisposable
 
         // `is { } delta` is a pattern that means "is not null, and call it delta".
         if (header.Delta is { } delta)
-            return delta > TimeSpan.Zero ? delta : TimeSpan.Zero;
+            return Clamp(delta);
 
         if (header.Date is { } date)
-        {
-            var wait = date - DateTimeOffset.UtcNow;
-            return wait > TimeSpan.Zero ? wait : TimeSpan.Zero;
-        }
+            return Clamp(date - DateTimeOffset.UtcNow);
 
         return null;
+
+        static TimeSpan Clamp(TimeSpan wait) =>
+            wait < TimeSpan.Zero ? TimeSpan.Zero
+            : wait > MaxRetryAfter ? MaxRetryAfter
+            : wait;
     }
 
     // Never let a malformed body throw into the game; an unparseable response is just "no value".

@@ -1,3 +1,5 @@
+using System;
+
 namespace XIVShinies.SyncPlugin.Sync;
 
 /// <summary>
@@ -34,15 +36,21 @@ public sealed record CharacterIdentity
     /// yield a blank string.
     /// </para>
     /// <para>
-    /// A blank name or world violates the contract's 1-100 character constraint, so the server
-    /// rejects the whole upload with a 400. That rejection is classified as a plugin bug rather than
-    /// something the user can fix, so it does not halt syncing — meaning a blank identity, once
-    /// cached, would quietly re-fail every upload for the rest of the session. Checking before
-    /// caching is what prevents that.
+    /// A blank — or absurdly long — name or world violates the contract's 1-100 character
+    /// constraint, so the server rejects the whole upload with a 400. That rejection is classified
+    /// as a plugin bug rather than something the user can fix, so it does not halt syncing —
+    /// meaning a bad identity, once cached, would quietly re-fail every upload for the rest of the
+    /// session. Checking before caching is what prevents that. (Real names and worlds are nowhere
+    /// near 100 characters; the upper bound is defensive, so the guard fully matches the
+    /// constraint it exists to satisfy.)
     /// </para>
     /// </remarks>
     // A static method rather than an instance one, so the caller can test the raw values it read from
     // the game before it commits them to a CharacterIdentity.
     public static bool IsUsable(string? name, string? homeWorld) =>
-        !string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(homeWorld);
+        IsWithinContract(name) && IsWithinContract(homeWorld);
+
+    // The contract's bound: 1-100 characters after trimming (the payload builder trims too).
+    private static bool IsWithinContract(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && value.AsSpan().Trim().Length <= 100;
 }

@@ -142,7 +142,7 @@ internal sealed class SyncManager : IDisposable
     /// <remarks>
     /// A request in flight cannot be recalled: logout does not cancel it (only plugin unload does),
     /// so its answer can land seconds later — and without this counter that late answer would write
-    /// status and halts for the <i>previous</i> character onto the next one's session. Same pattern
+    /// the <i>previous</i> character's status, or worse a halt, onto the next one's session. Same pattern
     /// as <see cref="Windows.TokenVerifier"/>: the work captures the generation it was started for,
     /// and an answer to a superseded generation is thrown away. Only the framework thread writes
     /// this (single writer, so the non-atomic increment is safe); background tasks only read it.
@@ -537,6 +537,7 @@ internal sealed class SyncManager : IDisposable
     {
         CollectionSnapshot snapshot;
         SyncRequest request;
+        UploadLogEntry logDraft;
 
         // The scheduler has already handed this work out, so a throw here would silently lose the
         // sweep. Worse, an exception escaping the Update handler propagates into Dalamud's dispatch.
@@ -566,18 +567,20 @@ internal sealed class SyncManager : IDisposable
 
             request = SyncPayloadBuilder.Build(
                 identity!, pluginVersion, due.Trigger, snapshot, config?.ManifestVersion);
+
+            // The upload-log draft is summarized HERE, from the same snapshot the payload was
+            // built from — so the log describes what actually went out, never a reconstruction.
+            // Its status and failure diagnostics are filled in when the response settles. Inside
+            // this try on purpose: Draft serializes and hashes the facts, and this method's
+            // promise is that nothing in it can throw into the frame dispatch.
+            logDraft = UploadLogEntry.Draft(
+                timeProvider.GetUtcNow(), due.Trigger, snapshot, config?.ManifestVersion);
         }
         catch (Exception ex)
         {
             log.Error(ex, $"Could not assemble the {due.Trigger} upload; skipping it.");
             return;
         }
-
-        // The upload-log draft is summarized HERE, from the same snapshot the payload was built
-        // from — so the log describes what actually went out, never a reconstruction. Its status
-        // and failure diagnostics are filled in when the response settles.
-        var logDraft = UploadLogEntry.Draft(
-            timeProvider.GetUtcNow(), due.Trigger, snapshot, config?.ManifestVersion);
 
         uploadInFlight = true;
 

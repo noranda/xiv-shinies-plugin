@@ -11,10 +11,10 @@ namespace XIVShinies.SyncPlugin.Api;
 public static class TokenFormat
 {
     /// <summary>
-    /// The marker every token starts with ("XIV Shinies"). Defined by the server, not by the
-    /// plugin — do not change it. Like <c>ghp_</c> on a GitHub token, a distinctive prefix lets a
-    /// leaked value be recognized by secret scanners, and lets both sides reject obvious junk
-    /// before doing any lookup work.
+    /// The <c>xvs_</c> prefix (short for "XIV Shinies") every token starts with. Defined by the
+    /// server, not by the plugin — do not change it. Like <c>ghp_</c> on a GitHub token, a
+    /// distinctive prefix lets a leaked value be recognized by secret scanners, and lets both
+    /// sides reject obvious junk before doing any lookup work.
     /// </summary>
     public const string Prefix = "xvs_";
 

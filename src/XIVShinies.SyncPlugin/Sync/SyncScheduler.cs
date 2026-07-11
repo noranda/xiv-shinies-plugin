@@ -216,7 +216,7 @@ public sealed class SyncScheduler
                 // whole session. Anchoring here means the next interval simply retries.
                 lastFullSweepAt = now;
 
-                return new SyncDue {Trigger = requested};
+                return new SyncDue { Trigger = requested };
             }
 
             // 2. A settled burst of unlocks: upload exactly the categories that changed.
@@ -224,7 +224,7 @@ public sealed class SyncScheduler
             {
                 var categories = new HashSet<string>(pendingUnlockCategories);
                 pendingUnlockCategories.Clear();
-                return new SyncDue {Trigger = SyncTrigger.Unlock, Categories = categories};
+                return new SyncDue { Trigger = SyncTrigger.Unlock, Categories = categories };
             }
 
             // 3. The periodic sweep. Stamping the clock here rather than in MarkUploaded means a
@@ -239,7 +239,7 @@ public sealed class SyncScheduler
             {
                 lastFullSweepAt = now;
                 pendingUnlockCategories.Clear();
-                return new SyncDue {Trigger = SyncTrigger.Interval};
+                return new SyncDue { Trigger = SyncTrigger.Interval };
             }
 
             return null;

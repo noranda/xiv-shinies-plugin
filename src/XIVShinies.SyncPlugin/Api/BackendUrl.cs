@@ -69,7 +69,13 @@ public static class BackendUrl
         // Dalamud requires plugins to reach a backend by DNS hostname rather than a raw IP
         // address, and states no exemption — so this rejects loopback IPs too. Nothing is lost:
         // "localhost" is a DNS name and reaches the same place as 127.0.0.1.
-        if (uri.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6)
+        //
+        // Two checks, because Uri only classifies DOTTED addresses as IPv4: the obscure single-
+        // number encodings of an IPv4 address (decimal "2130706433", hex "0x7f000001" — both
+        // 127.0.0.1) parse as DNS names by Uri's rules, yet the OS resolver still treats them as
+        // addresses. IPAddress.TryParse recognizes those spellings, closing the loophole.
+        if (uri.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6
+            || System.Net.IPAddress.TryParse(uri.Host, out _))
         {
             error = "Enter the server by domain name (use localhost, not 127.0.0.1).";
             return false;
