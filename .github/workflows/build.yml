@@ -1,0 +1,63 @@
+# Continuous integration: prove that every pull request builds warning-clean and passes the
+# unit-test suite against a clean Dalamud install — not just on the author's machine.
+#
+# The job name below ("build") is a required status check on main's branch protection ruleset,
+# so a red run blocks the merge. Renaming the job breaks that link — update the ruleset too.
+#
+# Deliberately PR-only (plus a manual trigger): the Dalamud dev distribution downloaded below
+# always tracks the CURRENT Dalamud release, so when a game patch bumps the Dalamud API level,
+# this workflow starts failing until the plugin's SDK is updated to match. Running only on pull
+# requests means that failure surfaces on the next PR — when someone is at the keyboard to act
+# on it — rather than spontaneously reddening main's history. This mirrors goatcorp's own
+# SamplePlugin CI, and the failure is genuine signal: an API bump always requires plugin work.
+name: Build
+
+on:
+  pull_request:
+    branches: [main]
+  # Allows a manual run from the Actions tab — e.g. to check whether a Dalamud update broke
+  # the build without opening a PR.
+  workflow_dispatch:
+
+jobs:
+  build:
+    # The plugin targets net10.0-windows (it runs inside the Windows game client), so it must
+    # build on a Windows runner.
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      # The Dalamud.NET.Sdk resolves the game-facing reference assemblies from XIVLauncher's
+      # dev-hooks directory (%AppData%\XIVLauncher\addon\Hooks\dev). CI has no XIVLauncher, so
+      # goatcorp's published dev distribution is unpacked to that exact path to stand in for it.
+      - name: Download Dalamud dev libraries
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
+          Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+
+      # -warnaserror enforces the repo's warning-clean convention (see the committing-code
+      # skill): a build that would merely warn locally fails here, so warnings cannot merge.
+      - name: Build
+        run: dotnet build --configuration Release -warnaserror
+
+      # --no-build reuses the binaries from the step above rather than compiling twice.
+      - name: Test
+        run: dotnet test --configuration Release --no-build
+
+      # The Release build already produced the DalamudPackager output (the same latest.zip a
+      # release would ship). Uploading it lets anyone grab a PR's build from the Actions run and
+      # point XIVLauncher's Dev Plugin Locations at it for in-game QA.
+      - name: Upload plugin package
+        uses: actions/upload-artifact@v4
+        with:
+          name: XIVShinies.SyncPlugin
+          path: src/XIVShinies.SyncPlugin/bin/Release/XIVShinies.SyncPlugin/*
+          if-no-files-found: error
+          retention-days: 7

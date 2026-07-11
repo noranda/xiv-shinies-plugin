@@ -89,4 +89,17 @@ public class BackendUrlTests
         Assert.Null(uri);
         Assert.NotNull(error);
     }
+
+    // The obscure single-number spellings of an IPv4 address: Uri classifies these as DNS names,
+    // but the OS resolver treats them as addresses — both are 127.0.0.1 here. "Raw IP refused"
+    // must hold for every spelling of an address, not just the dotted one.
+    [Theory]
+    [InlineData("https://2130706433")]  // 127.0.0.1 as one decimal number
+    [InlineData("https://0x7f000001")]  // 127.0.0.1 in hex
+    public void Rejects_numerically_encoded_ip_addresses(string raw)
+    {
+        Assert.False(BackendUrl.TryNormalize(raw, out var uri, out var error));
+        Assert.Null(uri);
+        Assert.NotNull(error);
+    }
 }

@@ -39,4 +39,21 @@ public class CharacterIdentityTests
     {
         Assert.False(CharacterIdentity.IsUsable("\t\n ", "Excalibur"));
     }
+
+    // The contract's other edge: 100 characters is the maximum the server accepts. Real names and
+    // worlds are far shorter, so this guards a theoretical bad read the same way the blank check
+    // guards a real one — either would 400 every upload for the session if cached.
+    [Fact]
+    public void The_contract_length_bound_is_enforced_on_both_ends()
+    {
+        var hundred = new string('a', 100);
+        var hundredAndOne = new string('a', 101);
+
+        Assert.True(CharacterIdentity.IsUsable(hundred, "Excalibur"));
+        Assert.False(CharacterIdentity.IsUsable(hundredAndOne, "Excalibur"));
+        Assert.False(CharacterIdentity.IsUsable("Some Name", hundredAndOne));
+
+        // Trimming happens before the length check, matching the server's order of operations.
+        Assert.True(CharacterIdentity.IsUsable($"  {hundred}  ", "Excalibur"));
+    }
 }

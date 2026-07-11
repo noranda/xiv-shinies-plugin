@@ -139,7 +139,7 @@ internal sealed class TokenVerifier : IDisposable
             // means something genuinely unexpected happened. Surface it as an unreachable server
             // rather than letting it escape a discarded task.
             if (startedFor == generation)
-                result = new ApiResponse<MeResponse> {Status = ApiStatus.Unknown};
+                result = new ApiResponse<MeResponse> { Status = ApiStatus.Unknown };
         }
         finally
         {

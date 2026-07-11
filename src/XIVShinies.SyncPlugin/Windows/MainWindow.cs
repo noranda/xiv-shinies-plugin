@@ -25,10 +25,10 @@ using Dalamud.Interface.Utility;
 // Scoped wrappers for ImGui's push/pop pairs. `using (ImRaii.Disabled(...))` guarantees the matching
 // End/Pop even if the block throws — a whole class of unbalanced-stack bugs stops existing.
 using Dalamud.Interface.Utility.Raii;
-// Util.OpenLink — opens a URL in the user's browser (the masthead's community links).
-using Dalamud.Utility;
 // The windowing helpers (Window base class, WindowSystem) that manage plugin windows for us.
 using Dalamud.Interface.Windowing;
+// Util.OpenLink — opens a URL in the user's browser (the masthead's community links).
+using Dalamud.Utility;
 using XIVShinies.SyncPlugin.Api;
 using XIVShinies.SyncPlugin.Collectors;
 using XIVShinies.SyncPlugin.Onboarding;

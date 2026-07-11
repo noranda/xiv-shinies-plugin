@@ -145,13 +145,13 @@ public sealed unsafe class ItemCollector : ICollector
 
         // KNOWN GAP: this finds gear stored in the dresser INDIVIDUALLY. Gear stored "as an outfit"
         // occupies a dresser slot whose id is the outfit's set id (a MirageStoreSetItem row), not
-        // the id of any piece inside it, so a piece stored that way does not match here. Confirmed
-        // in game: the same item is found stored individually and missed stored inside an outfit.
+        // the id of any piece inside it — so a piece stored that way does not match here, while the
+        // same piece stored individually does.
         //
         // The gap is narrow. Storing as an outfit is only offered for gear that has a curated
-        // MirageStoreSetItem row (largely promotional sets), so ordinary gear — including relic
-        // armour, checked in game — has no outfit option and cannot hide here. Weapons and tools,
-        // which is all the manifest asks about today, never can.
+        // MirageStoreSetItem row (largely promotional sets), so ordinary gear — relic armor
+        // included — has no outfit option and cannot hide here. Weapons and tools, which is all
+        // the manifest asks about today, never can.
         //
         // Before the server adds relic gear to the manifest, verify the assumption rather than
         // trusting it: intersect the member item ids of every MirageStoreSetItem row with the gear

@@ -19,8 +19,9 @@ be reported the same way; they will be routed to the right place.
 ## What the plugin promises
 
 - The token is sent only over HTTPS, only as an `Authorization` header, and only to the
-  configured backend — which is refused outright if it is a raw IP address or plaintext to a
-  remote host. Pointing the plugin at a non-default backend requires an explicit
+  configured backend — which is refused outright if it is a raw IP address (in any spelling) or
+  plaintext to a remote host, and HTTP redirects are not followed so the server cannot hand the
+  token elsewhere. Pointing the plugin at a non-default backend requires an explicit
   acknowledgment, because the token is sent to whatever host is configured.
 - The character's raw ContentId never leaves the game process — it is hashed (SHA-256) on the
   machine, and the raw value is never logged or persisted.

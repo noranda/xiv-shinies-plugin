@@ -42,6 +42,13 @@ public sealed record UploadLogEntry
     public required SyncTrigger Trigger { get; init; }
 
     /// <summary>
+    /// The longest server-supplied string an entry will keep (the validation detail, the manifest
+    /// version). The backend is user-overridable and therefore untrusted; entries persist for up
+    /// to twenty uploads and render in ImGui, so adopted text is clamped at the door.
+    /// </summary>
+    public const int MaxServerStringLength = 500;
+
+    /// <summary>
     /// How the attempt ended. A draft carries <see cref="ApiStatus.Unknown"/> until the response
     /// lands; only settled entries reach the log.
     /// </summary>
@@ -105,7 +112,12 @@ public sealed record UploadLogEntry
             Status = ApiStatus.Unknown,
             Categories = categories,
             Skipped = snapshot.Skipped,
-            ManifestVersion = manifestVersion,
+
+            // A content hash (12 chars from our server), but the backend is user-overridable, so
+            // clamp it like every other adopted server string before it persists in the log.
+            ManifestVersion = manifestVersion is { Length: > MaxServerStringLength }
+                ? manifestVersion[..MaxServerStringLength]
+                : manifestVersion,
         };
     }
 
@@ -118,17 +130,24 @@ public sealed record UploadLogEntry
 
     /// <summary>
     /// A short, deterministic hash of a category's facts. Collectors build their facts in a
-    /// stable order (game sheets and the manifest are iterated in order), so identical contents
-    /// always hash identically — and any change, even one that leaves the count the same,
-    /// changes the hash.
+    /// stable order (game sheets iterate in ascending row order; the item manifest arrives
+    /// sorted by the server's contract), so identical contents always hash identically — and any
+    /// change, even one that leaves the count the same, changes the hash.
     /// </summary>
+    /// <remarks>
+    /// The stability depends on that ordering: if a source ever reordered identical facts, the
+    /// hash would change and the log would show a spurious "(changed)". Cosmetic-only — the
+    /// payload and the diff of real content are unaffected — but worth knowing if a gold
+    /// highlight ever appears with no visible difference.
+    /// </remarks>
     private static string Fingerprint(JsonNode facts)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(facts.ToJsonString()));
 
         // Eight hex characters: not a security boundary, just a change detector — 32 bits is
         // plenty to make an accidental collision between two consecutive uploads implausible.
-        return Convert.ToHexString(bytes, 0, 4).ToLowerInvariant();
+        // (Same hex idiom as ContentIdHash, for one way of doing things across the codebase.)
+        return Convert.ToHexStringLower(bytes.AsSpan(0, 4));
     }
 }
 
@@ -301,6 +320,12 @@ public static class UploadLogText
     /// Flattens a rejected payload's validation complaints to one line, or null when the server
     /// sent none — form-level errors first, then each failing field with its messages.
     /// </summary>
+    /// <remarks>
+    /// The strings come from the backend, which is user-overridable and therefore not trusted:
+    /// the result is truncated so a hostile server cannot make a log entry (kept for up to 20
+    /// uploads and rendered in ImGui) arbitrarily large. The response body is already capped
+    /// upstream; this is defense in depth at the point the text is adopted.
+    /// </remarks>
     public static string? IssuesText(ErrorResponse? error)
     {
         if (error?.Issues is not { } issues)
@@ -320,7 +345,13 @@ public static class UploadLogText
                 parts.Add($"{field}: {string.Join("; ", messages)}");
         }
 
-        return parts.Count == 0 ? null : string.Join(" · ", parts);
+        if (parts.Count == 0)
+            return null;
+
+        var text = string.Join(" · ", parts);
+        return text.Length <= UploadLogEntry.MaxServerStringLength
+            ? text
+            : text[..UploadLogEntry.MaxServerStringLength] + "…";
     }
 
     /// <summary>

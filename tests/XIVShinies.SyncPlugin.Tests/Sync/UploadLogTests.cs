@@ -368,6 +368,24 @@ public class UploadLogTests
         }));
     }
 
+    // Validation text is server-supplied and the backend is user-overridable, so a hostile
+    // server must not be able to bloat the in-memory log or the ImGui rendering with it.
+    [Fact]
+    public void Issues_text_truncates_absurdly_long_server_complaints()
+    {
+        var error = new ErrorResponse
+        {
+            Error = "invalid_payload",
+            Issues = new ValidationIssues { FormErrors = new[] { new string('x', 10_000) } },
+        };
+
+        var text = UploadLogText.IssuesText(error);
+
+        Assert.NotNull(text);
+        Assert.Equal(UploadLogEntry.MaxServerStringLength + 1, text!.Length); // +1 for the ellipsis
+        Assert.EndsWith("…", text);
+    }
+
     [Fact]
     public void Issues_text_flattens_form_and_field_errors_into_one_line()
     {
