@@ -17,10 +17,6 @@ New unlocks — quests, achievements, mounts, minions, and more — appear on th
 seconds, and everything else syncs automatically in the background, so you stop hand-marking
 what you already earned.
 
-> **Status:** feature-complete and in final pre-release testing. The first tagged release and
-> the install repository are coming soon; until then, developers can build and load it locally
-> (see [CONTRIBUTING.md](CONTRIBUTING.md)).
-
 ![The settings window: sync status, collection toggles, and the branded header](images/screenshots/settings-1-masthead-sync.png)
 
 ## How it works
@@ -75,7 +71,7 @@ when the plugin unloads.
 
 ## Installing
 
-### From the plugin repository (once released)
+### From the plugin repository
 
 1. In-game, open `/xlsettings` → **Experimental**.
 2. Add this URL under **Custom Plugin Repositories**:
