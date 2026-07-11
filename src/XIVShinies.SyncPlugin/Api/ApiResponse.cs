@@ -28,6 +28,14 @@ public sealed record ApiResponse<T> where T : class
     /// </summary>
     public TimeSpan? RetryAfter { get; init; }
 
+    /// <summary>
+    /// The literal HTTP status code, when a response arrived at all (null for network failures).
+    /// <see cref="Status"/> is the contract's interpretation and can erase the number — a 502
+    /// from a proxy and a 418 both map to <see cref="ApiStatus.Unknown"/> — so diagnostics keep
+    /// the original.
+    /// </summary>
+    public int? HttpStatusCode { get; init; }
+
     /// <summary>True when the call succeeded and a body was parsed.</summary>
     public bool IsSuccess => Status == ApiStatus.Ok && Value is not null;
 }

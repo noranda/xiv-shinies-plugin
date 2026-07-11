@@ -54,4 +54,14 @@
     The merged result lands at bin/Release/XIVShinies.SyncPlugin.json and inside the packaged
     zip — that's what Dalamud actually reads when loading the plugin.
   -->
+
+  <!--
+    <ItemGroup> holds file lists (compare to arrays in a package.json). This one copies the
+    plugin icon into the build output: Dalamud shows a dev plugin's icon only if images/icon.png
+    sits next to the loaded DLL, and DalamudPackager picks the same folder up for release zips.
+    The icon is hand-made (Dalamud's AI policy disallows AI-generated icons).
+  -->
+  <ItemGroup>
+    <None Include="images\icon.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

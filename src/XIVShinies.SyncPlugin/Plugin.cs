@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+// Path.Combine, for locating the mascot image next to the plugin DLL.
+using System.IO;
 // Dalamud's command system (registering the /shinies slash command).
 using Dalamud.Game.Command;
 // The windowing system that draws and manages our ImGui windows.
@@ -72,6 +74,9 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
 
+    /// <summary>Loads image files into GPU textures that ImGui can draw.</summary>
+    [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
+
     // --- Plugin state --------------------------------------------------------------------
 
     /// <summary>The persisted settings object (see Configuration.cs).</summary>
@@ -124,9 +129,22 @@ public sealed class Plugin : IDalamudPlugin
             Framework, ClientState, PlayerState, UnlockState, Log,
             apiClient, Configuration.Settings, collectors, version);
 
+        // The mascot drawn in the settings header — the same hand-made image the installer shows,
+        // shipped next to the DLL. GetFromFile returns a shared texture that loads lazily and is
+        // owned by Dalamud, so there is nothing to dispose on our side; if the file is missing the
+        // wrap comes back empty and the header simply draws without an image.
+        var mascotTexture = TextureProvider.GetFromFile(Path.Combine(
+            PluginInterface.AssemblyLocation.DirectoryName ?? string.Empty, "images", "icon.png"));
+
         // Create our window and hand it to the WindowSystem so it gets drawn each frame. It reads the
-        // sync manager's status and the collectors' self-descriptions, so it is built after both.
-        mainWindow = new MainWindow(Configuration, apiClient, syncManager, collectors);
+        // sync manager's status and the collectors' self-descriptions, so it is built after both. The
+        // font pieces let it build a heading-sized font and draw FontAwesome icons.
+        mainWindow = new MainWindow(
+            Configuration, apiClient, syncManager, collectors, mascotTexture,
+            PluginInterface.UiBuilder.FontAtlas,
+            PluginInterface.UiBuilder.IconFontHandle,
+            PluginInterface.UiBuilder.DefaultFontSpec.SizePx,
+            version);
         windowSystem.AddWindow(mainWindow);
 
         // Register the /shinies command. CommandInfo takes the handler method (OnCommand); the

@@ -183,7 +183,8 @@ public sealed class ApiClient : IDisposable
             // It is the right default for library code and keeps us off the framework thread.
             using var response = await http.SendAsync(request, linked.Token).ConfigureAwait(false);
 
-            var status = ApiStatusMap.FromHttpStatusCode((int)response.StatusCode);
+            var rawCode = (int)response.StatusCode;
+            var status = ApiStatusMap.FromHttpStatusCode(rawCode);
             var body = await response.Content.ReadAsStringAsync(linked.Token).ConfigureAwait(false);
 
             if (status == ApiStatus.Ok)
@@ -192,8 +193,8 @@ public sealed class ApiClient : IDisposable
 
                 // A 200 whose body we cannot read is not a success.
                 return value is null
-                    ? new ApiResponse<T> { Status = ApiStatus.Unknown }
-                    : new ApiResponse<T> { Status = ApiStatus.Ok, Value = value };
+                    ? new ApiResponse<T> { Status = ApiStatus.Unknown, HttpStatusCode = rawCode }
+                    : new ApiResponse<T> { Status = ApiStatus.Ok, Value = value, HttpStatusCode = rawCode };
             }
 
             return new ApiResponse<T>
@@ -201,6 +202,7 @@ public sealed class ApiClient : IDisposable
                 Status = status,
                 Error = Deserialize<ErrorResponse>(body),
                 RetryAfter = ReadRetryAfter(response),
+                HttpStatusCode = rawCode,
             };
         }
         // A `when` filter narrows which exceptions this catch handles. Catch the BASE

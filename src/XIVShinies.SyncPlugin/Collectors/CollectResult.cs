@@ -51,9 +51,11 @@ public static class CollectSkipReasons
     /// </remarks>
     public static string? Describe(string reason) => reason switch
     {
+        // Ends with the follow-up action, because nothing happens on its own: the plugin cannot
+        // see the window open, so the user must trigger the re-read themselves.
         AchievementListNotLoaded =>
             "Open your Achievements window in game once, so the game will tell the plugin which " +
-            "achievements you have earned.",
+            "achievements you have earned — then press Sync now.",
 
         NoRemoteConfig => "Waiting for XIV Shinies to say which items to look for.",
 

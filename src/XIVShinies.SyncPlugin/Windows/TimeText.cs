@@ -30,4 +30,28 @@ public static class TimeText
         var hours = (int)elapsed.TotalHours;
         return hours == 1 ? "1 hour ago" : $"{hours} hours ago";
     }
+
+    /// <summary>
+    /// Formats a recurring cadence as "30 minutes", "1 hour", "90 minutes" — for sentences like
+    /// "syncs automatically every {Interval}".
+    /// </summary>
+    /// <remarks>
+    /// The server tunes the sync interval at runtime, so this cannot be a hardcoded string. Whole
+    /// hours read as hours; anything else reads as minutes, because "1 hour 30 minutes" is longer
+    /// than the number it explains.
+    /// </remarks>
+    public static string Interval(TimeSpan interval)
+    {
+        // Sub-minute values cannot reach this from the scheduler (it clamps at five minutes), but
+        // a formatter that can print "0 minutes" eventually will.
+        var minutes = Math.Max(1, (int)Math.Round(interval.TotalMinutes));
+
+        if (minutes % 60 == 0)
+        {
+            var hours = minutes / 60;
+            return hours == 1 ? "1 hour" : $"{hours} hours";
+        }
+
+        return minutes == 1 ? "1 minute" : $"{minutes} minutes";
+    }
 }

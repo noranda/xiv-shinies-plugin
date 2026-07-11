@@ -71,6 +71,10 @@ internal sealed class SyncManager : IDisposable
 
     private readonly SyncScheduler scheduler = new();
 
+    // What each recent upload sent and how the server answered — the settings window's upload
+    // log. In memory only; see UploadLog for why it is deliberately not persisted.
+    private readonly UploadLog uploadLog = new();
+
     /// <summary>
     /// Cancelled on unload, so an upload in flight when the plugin is torn down stops rather than
     /// completing against disposed state.
@@ -235,6 +239,22 @@ internal sealed class SyncManager : IDisposable
 
     /// <summary>The most recent server config, for the settings window to render category switches from.</summary>
     public ConfigResponse? RemoteConfig => remoteConfig;
+
+    /// <summary>
+    /// The current automatic full-sweep cadence, after the server's tuning and the plugin's
+    /// clamps — so the settings window can state the real number instead of a hardcoded one.
+    /// </summary>
+    public TimeSpan FullSyncInterval => scheduler.FullSyncInterval;
+
+    /// <summary>True while an upload is on the wire — lets the Sync now button show it live.</summary>
+    /// <remarks>A volatile bool read, so safe from the draw call; at worst one frame stale.</remarks>
+    public bool UploadInFlight => uploadInFlight;
+
+    /// <summary>The recent uploads, newest first, for the settings window's upload log.</summary>
+    public IReadOnlyList<UploadLogEntry> UploadHistory => uploadLog.Entries;
+
+    /// <summary>Empties the upload log, for the settings window's clear button.</summary>
+    public void ClearUploadHistory() => uploadLog.Clear();
 
     /// <summary>
     /// Why each category was skipped by the last collection pass. Empty before the first pass.
@@ -536,6 +556,12 @@ internal sealed class SyncManager : IDisposable
             return;
         }
 
+        // The upload-log draft is summarized HERE, from the same snapshot the payload was built
+        // from — so the log describes what actually went out, never a reconstruction. Its status
+        // and failure diagnostics are filled in when the response settles.
+        var logDraft = UploadLogEntry.Draft(
+            timeProvider.GetUtcNow(), due.Trigger, snapshot, config?.ManifestVersion);
+
         uploadInFlight = true;
 
         // Task.Run moves the whole thing off the framework thread, including the JSON serialization
@@ -550,7 +576,7 @@ internal sealed class SyncManager : IDisposable
         // The generation is captured here, once, so the task compares against the session it was
         // started for rather than whatever the field holds when the response lands.
         var startedFor = sessionGeneration;
-        _ = Task.Run(() => UploadAsync(request, due.Trigger, startedFor));
+        _ = Task.Run(() => UploadAsync(request, due.Trigger, startedFor, logDraft));
     }
 
     /// <summary>
@@ -610,7 +636,9 @@ internal sealed class SyncManager : IDisposable
 
     /// <summary>Uploads off the framework thread, retrying once if the failure was transient.</summary>
     /// <param name="startedFor">The session generation this upload belongs to.</param>
-    private async Task UploadAsync(SyncRequest request, SyncTrigger trigger, int startedFor)
+    /// <param name="logDraft">The upload-log summary of what this request carries, awaiting its outcome.</param>
+    private async Task UploadAsync(
+        SyncRequest request, SyncTrigger trigger, int startedFor, UploadLogEntry logDraft)
     {
         try
         {
@@ -631,11 +659,38 @@ internal sealed class SyncManager : IDisposable
                     return;
                 }
 
+                // The draft plus everything the settled response can add to "why": the outcome,
+                // which attempt this was, the server's requested wait, the raw HTTP code, and
+                // any validation complaints — the diagnostics a pasted bug report needs.
+                var settledEntry = logDraft with
+                {
+                    Status = response.Status,
+                    Attempt = attempt + 1,
+                    RetryAfter = response.RetryAfter,
+                    HttpStatusCode = response.HttpStatusCode,
+                    Detail = UploadLogText.IssuesText(response.Error),
+                };
+
                 if (HandleResponse(response, trigger, startedFor))
+                {
+                    // Settled: recorded even for failures — a transparency log that hid failed
+                    // uploads would be lying. The generation is re-checked at the moment of
+                    // writing, the same discipline HandleResponse applies to the status fields:
+                    // HandleResponse also returns true for a response it DISCARDED as stale, and
+                    // a previous character's upload must not be written into the log either.
+                    if (startedFor == sessionGeneration)
+                        uploadLog.Record(settledEntry);
+
                     return;
+                }
 
                 if (!RetryPolicy.ShouldRetryNow(response.Status, attempt))
+                {
+                    if (startedFor == sessionGeneration)
+                        uploadLog.Record(settledEntry);
+
                     return;
+                }
 
                 // Writes are idempotent server-side, so repeating the identical body is safe.
                 log.Debug($"Retrying {trigger} sync after {response.Status}.");
