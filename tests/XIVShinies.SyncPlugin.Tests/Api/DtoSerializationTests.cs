@@ -342,4 +342,44 @@ public class DtoSerializationTests
 
         Assert.Equal("""{"id":7851,"count":0,"fresh":true}""", json);
     }
+
+    [Fact]
+    public void ConfigResponse_deserializes_item_manifest_groups()
+    {
+        const string json = """
+            {"categories":{"items":true},"enabled":true,
+             "intervals":{"fullSyncMinutes":30,"unlockDebounceSeconds":5},
+             "itemManifest":[7851],"manifestVersion":"abc123",
+             "itemManifestGroups":[
+               {"key":"relic-proofs","label":"Relic weapons & tools you own","ids":[7851],"legacy":true},
+               {"key":"relic-materials","label":"Relic materials","ids":[27798,24248]}]}
+            """;
+
+        var config = JsonSerializer.Deserialize<ConfigResponse>(json, ApiJson.Options)!;
+
+        Assert.NotNull(config.ItemManifestGroups);
+        Assert.Equal(2, config.ItemManifestGroups!.Count);
+        Assert.Equal("relic-proofs", config.ItemManifestGroups[0].Key);
+        Assert.Equal("Relic weapons & tools you own", config.ItemManifestGroups[0].Label);
+        Assert.True(config.ItemManifestGroups[0].Legacy);
+        Assert.Equal("relic-materials", config.ItemManifestGroups[1].Key);
+        Assert.False(config.ItemManifestGroups[1].Legacy);   // legacy defaults false when absent
+        Assert.Equal(new uint[] { 27798, 24248 }, config.ItemManifestGroups[1].Ids);
+    }
+
+    [Fact]
+    public void ConfigResponse_without_groups_leaves_them_null()
+    {
+        // A config without groups must deserialize cleanly — an older server is a supported peer,
+        // and null groups is the signal to fall back to the flat manifest.
+        const string json = """
+            {"categories":{},"enabled":true,
+             "intervals":{"fullSyncMinutes":30,"unlockDebounceSeconds":5},
+             "itemManifest":[7851],"manifestVersion":"abc123"}
+            """;
+
+        var config = JsonSerializer.Deserialize<ConfigResponse>(json, ApiJson.Options)!;
+
+        Assert.Null(config.ItemManifestGroups);
+    }
 }

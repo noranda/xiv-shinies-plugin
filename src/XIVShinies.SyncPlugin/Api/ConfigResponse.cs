@@ -32,6 +32,15 @@ public sealed record ConfigResponse
     public required string ManifestVersion { get; init; }
 
     /// <summary>
+    /// The manifest split into named consent groups, or null when the server does not send them.
+    /// Null means: fall back to <see cref="ItemManifest"/> as one implicit group covered by the
+    /// existing items consent — an older server is a supported peer.
+    /// </summary>
+    // NOT `required`: a required property makes deserialization of older configs throw,
+    // and an older server is a supported peer, not an error.
+    public IReadOnlyList<ItemManifestGroup>? ItemManifestGroups { get; init; }
+
+    /// <summary>
     /// Whether the server permits this category right now.
     /// </summary>
     /// <remarks>
@@ -52,4 +61,29 @@ public sealed record ConfigIntervals
 
     /// <summary>How long to wait after an unlock event before uploading, to batch a burst.</summary>
     public required int UnlockDebounceSeconds { get; init; }
+}
+
+/// <summary>
+/// One named slice of the item manifest, carrying its own user consent.
+/// </summary>
+/// <remarks>
+/// The plugin never hardcodes a group key and interprets exactly one flag: <see cref="Legacy"/>.
+/// Everything else (which ids, what the group means) is the server's business.
+/// </remarks>
+public sealed record ItemManifestGroup
+{
+    /// <summary>Stable consent identifier. A server-side RENAME is a new group (re-consent).</summary>
+    public required string Key { get; init; }
+
+    /// <summary>User-facing label, shown beside the group's opt-in checkbox.</summary>
+    public required string Label { get; init; }
+
+    /// <summary>The item ids this group asks about.</summary>
+    public required IReadOnlyList<uint> Ids { get; init; }
+
+    /// <summary>
+    /// True when this group's scope was already covered by pre-group items consent — the
+    /// one-time migration opts existing users into exactly these groups and nothing else.
+    /// </summary>
+    public bool Legacy { get; init; }
 }

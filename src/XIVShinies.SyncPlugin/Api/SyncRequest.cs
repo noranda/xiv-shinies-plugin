@@ -111,7 +111,7 @@ public sealed record ItemPossession
 
     /// <summary>
     /// How many high-quality copies are held, or null when none — null keys are omitted from
-    /// the JSON entirely. <c>count</c> stays normal-quality only (its v0.1.0 meaning); the server
+    /// the JSON entirely. <c>count</c> stays normal-quality only; the server
     /// decides whether HQ satisfies a requirement. The plugin reports raw facts per quality
     /// and never sums them.
     /// </summary>
