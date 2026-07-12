@@ -275,3 +275,37 @@ The two sides release independently. A newer plugin's unknown payload key is str
 logged, never an error; an older plugin simply omits keys, which is safe under monotonic
 writes. Adding a collection on the plugin side is one new `ICollector` class (see the repo
 `CLAUDE.md`); the per-category toggle and payload key then appear automatically.
+
+## Agreed contract additions (2026-07-12 — server rollout pending)
+
+Both workstreams have accepted the following additions as final; the deployed server does
+not implement them yet. Until it does, everything above remains the live contract — the
+server strips the new payload keys harmlessly, and the plugin behaves exactly as before
+whenever the new config fields are absent. When the server ships them, fold each into the
+main sections above and delete this section.
+
+- **Item manifest groups.** `/config` gains `itemManifestGroups`: an array of
+  `{key, label, ids, legacy?}` objects splitting the manifest into named consent groups.
+  `key` is a stable consent identifier (a rename is a NEW group and re-prompts consent);
+  `label` is user-facing; `legacy: true` marks a group whose scope pre-group items consent
+  already covered (the plugin's one-time migration auto-enables exactly those). The plugin
+  scans the union of user-enabled groups; a config without the field falls back to the flat
+  `itemManifest`, which then serves proof ids only.
+- **Per-quality item counts.** `items` entries gain optional `hqCount` and
+  `collectableCount` (omitted when zero). `count` keeps its existing meaning —
+  normal-quality copies only. The plugin never sums qualities; whether HQ satisfies a
+  requirement is the server's policy.
+- **Explicit zeros / per-id count semantics.** An `items` entry PRESENT — even with
+  `count: 0` — is a reported fact for that id; an id ABSENT from the list was not scanned
+  and carries no information. The server decides per id what a count means: relic-proof
+  ids keep today's sticky semantics (only `count > 0` acts, a zero is inert), while
+  count-tracked ids (shopping-list materials/currencies) use the reported counts as the
+  current total — including a zero, which lowers the website's counter. This is the one
+  deliberate, agreed exception to grow-only semantics, and it is scoped to counts: absence
+  still never clears anything, and proof/collection flags remain monotonic.
+- **Per-source scan status.** The sync payload gains an optional `itemSources` object:
+  `{"inventory": {"state": "live"}, "saddlebag": {"state": "cached"|"unscanned"},
+  "retainers": {"state": "cached", "count": 3}, "armoire": {"state": "loaded"|"unscanned"},
+  "glamourDresser": {"state": "cached"|"unscanned"}}`. It tells the server which sources
+  contributed to the counts (e.g. a zero while retainers are unscanned is a floor, not
+  truth) and powers "open your saddlebag once" hints.
