@@ -67,8 +67,16 @@ public sealed record ConfigIntervals
 /// One named slice of the item manifest, carrying its own user consent.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The plugin never hardcodes a group key and interprets exactly one flag: <see cref="Legacy"/>.
 /// Everything else (which ids, what the group means) is the server's business.
+/// </para>
+/// <para>
+/// <see cref="Key"/>, <see cref="Label"/>, and <see cref="Ids"/> are <c>required</c> on purpose:
+/// one malformed group fails the whole <c>/config</c> deserialization rather than being partially
+/// trusted — the same all-or-nothing stance every other required config field takes. The plugin
+/// then keeps its last known config until the next poll.
+/// </para>
 /// </remarks>
 public sealed record ItemManifestGroup
 {

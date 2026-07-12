@@ -159,6 +159,14 @@ public class CollectContextTests
     }
 
     [Fact]
+    public void The_enabled_group_list_is_empty_without_a_config()
+    {
+        var context = new CollectContext();
+
+        Assert.Empty(context.EnabledGroups);
+    }
+
+    [Fact]
     public void The_enabled_group_list_contains_only_opted_in_groups()
     {
         // The collector needs the group view (not just the union) to stay honest about what it
