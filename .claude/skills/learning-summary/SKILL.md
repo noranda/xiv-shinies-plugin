@@ -39,11 +39,14 @@ skill is even loaded.
 
 ## Format — two parts, always in this order
 
-### Part a — Plain English (2–3 sentences)
+### Part a — Plain English (1–3 sentences, HARD cap)
 
 - Assume the reader knows **nothing** about C#, .NET, or Dalamud.
 - Say **what** you built and **roughly how**, in everyday language. No jargon, no C# keywords.
 - Analogy to everyday things is fine; code terms are not.
+- **Never exceed three sentences.** If the idea won't fit, the plain-English part carries only
+  the core of it and the rest moves to part b. This cap also applies to ad-hoc plain-English
+  explanations given mid-conversation, not just formal summaries.
 
 ### Part b — A bit more technical (with React comparisons)
 
@@ -71,4 +74,6 @@ skill is even loaded.
 _(The maintainer notes tweaks to this skill here as we go — depth, what analogies land,
 what to drop.)_
 
-- _(none yet)_
+- **2026-07-12** — Part a is a HARD 1–3 sentence cap (a multi-paragraph "plain English"
+  explanation defeats its purpose); the cap covers mid-conversation explanations too. Also:
+  summaries run after every completed phase of multi-phase work, not only at the very end.
