@@ -308,4 +308,38 @@ public class DtoSerializationTests
         Assert.Equal("Request body is not valid JSON", Assert.Single(error.Issues!.FormErrors!));
         Assert.Equal("Invalid enum value.", Assert.Single(error.Issues.FieldErrors!["trigger"]));
     }
+
+    [Fact]
+    public void ItemPossession_serializes_quality_counts_in_camelCase_and_round_trips()
+    {
+        var possession = new ItemPossession
+        {
+            Id = 7851,
+            Count = 5,
+            HqCount = 2,
+            CollectableCount = 1,
+            Fresh = true,
+        };
+
+        var json = JsonSerializer.Serialize(possession, ApiJson.Options);
+
+        Assert.Equal("""{"id":7851,"count":5,"hqCount":2,"collectableCount":1,"fresh":true}""", json);
+
+        // Round-trip: deserialize and verify the record equals the original
+        var deserialized = JsonSerializer.Deserialize<ItemPossession>(json, ApiJson.Options)!;
+        Assert.Equal(possession, deserialized);
+    }
+
+    [Fact]
+    public void ItemPossession_omits_quality_count_keys_when_null()
+    {
+        // The common case: most relic materials only exist in normal quality. The optional keys
+        // must be ABSENT (WhenWritingNull), not zero — absent keys cost no bytes and can never be
+        // misread as a fact by an older server.
+        var possession = new ItemPossession { Id = 7851, Count = 0, Fresh = true };
+
+        var json = JsonSerializer.Serialize(possession, ApiJson.Options);
+
+        Assert.Equal("""{"id":7851,"count":0,"fresh":true}""", json);
+    }
 }
