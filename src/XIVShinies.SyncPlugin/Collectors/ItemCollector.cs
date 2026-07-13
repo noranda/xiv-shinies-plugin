@@ -157,8 +157,18 @@ public sealed unsafe class ItemCollector : ICollector
         foreach (var type in LiveContainers)
             TallyLiveContainer(inventory, type, manifestIds, live);
 
+        // LIVE TALLY (continued) — currencies the container walk cannot see. The walk above covers
+        // InventoryType.Currency (the common currencies on the in-game Currency tab), but the game
+        // tracks a second class of "currency" items in CurrencyManager instead — its buckets include
+        // scrips, Bicolor Gemstones, Trophy Crystals, ventures, and Island Sanctuary materials (per
+        // the FFXIVClientStructs docs). Which subsystem holds a given id is the game's business and
+        // not always guessable, so this simply resolves whatever the walk missed, by item id.
+        TallyCurrencyFallback(manifestIds, live);
+
         // Reaching this point means the inventory manager was readable and every live container was
-        // walked, so the inventory source is genuinely live this pass.
+        // walked, so the inventory source is genuinely live this pass. The currency-manager fallback
+        // above reads the same current game memory, so its counts are live too; whether it ran at all
+        // does not change this note (a null manager leaves the walk's results standing).
         sourceNotes[SourceKeys.Inventory] = new ItemSourceStatus { State = SourceStates.Live };
 
         // CACHED TALLY — the armoire, glamour dresser, saddlebags, and retainers, plus their notes.
@@ -224,6 +234,66 @@ public sealed unsafe class ItemCollector : ICollector
 
             // IsHighQuality()/IsCollectable() read the item's flags for us — no bit maths needed.
             AccumulateLive(live, id, (uint)quantity, slot->IsHighQuality(), slot->IsCollectable());
+        }
+    }
+
+    // Resolves manifest ids the container walk could not see by consulting CurrencyManager, the
+    // game's tracker for currencies that are not stored in an inventory container. Its documented
+    // buckets include scrips, Bicolor Gemstones, Trophy Crystals, ventures, and Island Sanctuary
+    // materials — but the split between the Currency container and these buckets is the game's
+    // internal choice, not a rule to rely on (a hunt seal, for example, sits in a bucket). Whatever
+    // the walk already tallied is intentionally skipped here; see the guard below.
+    //
+    // SAFETY — never query a count for an id the manager does not track. CurrencyManager keeps its
+    // currencies in three buckets (ItemBucket, SpecialItemBucket, ContentItemBucket per the
+    // FFXIVClientStructs docs); its GetItemCount takes an arbitrary item id and its behaviour for an id
+    // that is in NO bucket is not documented, so we treat it as unsafe to call blind. HasItem is the
+    // membership probe — the FFXIVClientStructs summary states it "Checks if the item is in any
+    // bucket" — so every GetItemCount call is gated behind a HasItem check that returned true. We never
+    // hand an untracked id to the count method on a "probably returns 0" assumption.
+    //
+    // DOUBLE-COUNT — the fallback only consults ids ABSENT from the live tally (`!live.ContainsKey`).
+    // A currency that lives in the Currency container was already tallied by the walk and would be
+    // double-counted if added again; skipping ids the walk found is how the two reads stay disjoint.
+    // (Currencies never appear in the cache-backed sources, so there is no overlap with `cached`.)
+    //
+    // This ADDS counts the walk cannot see; it never invents one. An id that is neither in a container
+    // nor tracked by the manager stays absent from every tally, and BuildPossessions still emits the
+    // honest explicit zero for it from the manifest — absence here means "no live copy found", not a
+    // guessed value.
+    private static void TallyCurrencyFallback(
+        HashSet<uint> manifestIds,
+        Dictionary<uint, ItemTally> live)
+    {
+        // Like the other game-memory singletons, a null instance means the subsystem is not available
+        // this pass. Skip the fallback entirely and leave the container walk's results untouched — the
+        // manager being briefly unreadable is not a reason to drop what we could already see.
+        var currency = CurrencyManager.Instance();
+        if (currency is null)
+            return;
+
+        // Iterate the deduped manifest id set, not every currency the game knows: the loop is bounded
+        // by how many ids the manifest asks about (tiny), preserving the walk-once cost discipline. We
+        // do not enumerate the manager's buckets.
+        foreach (var id in manifestIds)
+        {
+            // id 0 is never a real item; an id the walk already found is left to the walk's tally so it
+            // is not counted twice.
+            if (id == 0 || live.ContainsKey(id))
+                continue;
+
+            // Membership probe FIRST — only ask for a count once the manager confirms it tracks the id.
+            if (!currency->HasItem(id))
+                continue;
+
+            // Held amount for this currency. Currencies carry no quality, so the whole count is normal
+            // quality (the Nq bucket). A zero here adds nothing the manifest's explicit zero does not
+            // already report, so skip it rather than create an all-zero live entry.
+            var count = currency->GetItemCount(id);
+            if (count == 0)
+                continue;
+
+            AccumulateNq(live, id, count);
         }
     }
 
