@@ -63,6 +63,16 @@ internal sealed class SyncManager : IDisposable
     private readonly IPluginLog log;
     private readonly ApiClient apiClient;
     private readonly PluginSettings settings;
+
+    /// <summary>
+    /// Persists the settings object; invoked after this class mutates settings. Injected as a
+    /// callback so this class needs no reference to the Dalamud config shell.
+    /// </summary>
+    // `Action` is the built-in type for a parameterless, void-returning function value — the
+    // closest React analog is a `() => void` callback handed down as a prop: the caller decides
+    // what "persist" concretely does, and this class just calls it.
+    private readonly Action saveSettings;
+
     private readonly IReadOnlyList<ICollector> collectors;
     private readonly string pluginVersion;
 
@@ -187,6 +197,31 @@ internal sealed class SyncManager : IDisposable
     /// </remarks>
     private volatile IReadOnlyDictionary<string, string> lastSkipped = new Dictionary<string, string>();
 
+    /// <summary>
+    /// Per-source scan status from the most recent collection pass that reported any, keyed by
+    /// source (see <see cref="SourceKeys"/>) — for example, "the saddlebag was read from a
+    /// cache, not live". For the settings window.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Unlike <see cref="lastSkipped"/>, this is REPLACED wholesale rather than merged, and only
+    /// when the new pass actually produced something. A source note describes a physical storage
+    /// location as seen by the pass that reported it, not a per-category fact — an unlock pass that
+    /// reran only, say, the mounts collector knows nothing about the item sources and would report
+    /// none, so merging its (empty) notes over the last real observation would erase a true "the
+    /// armoire is unscanned" hint the user still needs to see. Replacing only on a non-empty result
+    /// keeps the window showing the last pass that actually looked at the item sources, which is
+    /// the truthful thing to show — not a snapshot of whichever pass happened to run most recently.
+    /// </para>
+    /// <para>
+    /// <c>volatile</c>, and never mutated once handed out, for the same cross-thread reason as
+    /// <see cref="lastSkipped"/>: the writer is the collection pass on the framework thread, the
+    /// reader is the window's draw call.
+    /// </para>
+    /// </remarks>
+    private volatile IReadOnlyDictionary<string, ItemSourceStatus> lastSourceNotes =
+        new Dictionary<string, ItemSourceStatus>();
+
     /// <summary>Wires the manager to the game. Subscribes only; uploads nothing.</summary>
     public SyncManager(
         IFramework framework,
@@ -196,6 +231,7 @@ internal sealed class SyncManager : IDisposable
         IPluginLog log,
         ApiClient apiClient,
         PluginSettings settings,
+        Action saveSettings,
         IReadOnlyList<ICollector> collectors,
         string pluginVersion,
         TimeProvider? timeProvider = null)
@@ -207,6 +243,7 @@ internal sealed class SyncManager : IDisposable
         this.log = log;
         this.apiClient = apiClient;
         this.settings = settings;
+        this.saveSettings = saveSettings;
         this.collectors = collectors;
         this.pluginVersion = pluginVersion;
         this.timeProvider = timeProvider ?? TimeProvider.System;
@@ -267,6 +304,14 @@ internal sealed class SyncManager : IDisposable
     /// </summary>
     /// <remarks>The returned dictionary is never mutated, so it is safe to read from any thread.</remarks>
     public IReadOnlyDictionary<string, string> LastSkipped => lastSkipped;
+
+    /// <summary>
+    /// Per-source scan status from the most recent collection pass that reported any (see
+    /// <see cref="lastSourceNotes"/> for why this replaces rather than merges). Empty before the
+    /// first such pass.
+    /// </summary>
+    /// <remarks>The returned dictionary is never mutated, so it is safe to read from any thread.</remarks>
+    public IReadOnlyDictionary<string, ItemSourceStatus> LastSourceNotes => lastSourceNotes;
 
     /// <summary>True when a character is loaded and identified, so an upload could actually happen.</summary>
     /// <remarks>
@@ -357,6 +402,11 @@ internal sealed class SyncManager : IDisposable
         // unloaded on logout. Carrying them into the next character would show hints about a state
         // that no longer exists.
         lastSkipped = new Dictionary<string, string>();
+
+        // Source notes describe THIS character's inventory, retainers, and other storage — none of
+        // which belongs to whoever logs in next. Carrying them across a character switch would show
+        // scan status for storage the new character does not own.
+        lastSourceNotes = new Dictionary<string, ItemSourceStatus>();
 
         // Queued work belongs to the character that queued it. Uploading it after a character switch
         // would attribute one character's unlocks to another.
@@ -570,6 +620,7 @@ internal sealed class SyncManager : IDisposable
             // every absent category's reason. Merging keeps the last thing each category said about
             // itself.
             RememberSkipReasons(snapshot);
+            RememberSourceNotes(snapshot);
 
             if (snapshot.Collections.Count == 0)
             {
@@ -636,6 +687,23 @@ internal sealed class SyncManager : IDisposable
             merged.Remove(category);
 
         lastSkipped = merged;
+    }
+
+    /// <summary>
+    /// Replaces the settings window's source-notes snapshot with this pass's, but only when this
+    /// pass actually reported any.
+    /// </summary>
+    /// <remarks>
+    /// See the reasoning on <see cref="lastSourceNotes"/> for why this replaces instead of merging
+    /// like <see cref="RememberSkipReasons"/> does, and why an empty result from this pass leaves
+    /// the field untouched rather than clearing it: a pass that never touched the item sources (for
+    /// example an unlock sweep for a different category) has nothing truthful to say about them, so
+    /// the last pass that did look stays the answer.
+    /// </remarks>
+    private void RememberSourceNotes(CollectionSnapshot snapshot)
+    {
+        if (snapshot.SourceNotes.Count > 0)
+            lastSourceNotes = snapshot.SourceNotes;
     }
 
     /// <summary>
@@ -841,8 +909,59 @@ internal sealed class SyncManager : IDisposable
                 // Applied even when the session generation has moved on: the config describes the
                 // server and the token, not the character, so it is just as valid for whoever logs
                 // in next.
-                remoteConfig = response.Value;
-                scheduler.ApplyIntervals(response.Value!.Intervals);
+                var config = response.Value!;
+                remoteConfig = config;
+                scheduler.ApplyIntervals(config.Intervals);
+
+                // The one-time pre-group consent migration (flag-guarded inside PluginSettings, so
+                // every poll after the first groups-bearing one is a no-op). Running it here means
+                // the first config a user ever receives that carries groups migrates their
+                // pre-group items consent before the next collection pass unions the enabled
+                // groups — without it, an existing user's item scan would go silent until they
+                // re-opted in by hand. The ordering is practical, not strict: the delegate is
+                // queued rather than awaited, but the login sweep's settle delay gives it ample
+                // room to land first, and losing that race would only delay the first item upload
+                // by one cycle (server writes are monotonic), never lose anything.
+                //
+                // Marshaled to the framework thread rather than run inline, deliberately. This poll
+                // completes on a background task, but PluginSettings' lists are not thread-safe and
+                // the framework thread reads EnabledItemGroupKeys on every collection pass
+                // (CollectorRunner copies it into the collect context). Keeping every settings
+                // MUTATION on the framework thread — the same single-writer discipline the
+                // identity fields document above — is what makes those reads safe without locks.
+                //
+                // `_ =` discards the returned task on purpose, like the Task.Run calls above:
+                // nothing awaits it, and the try/catch inside keeps anything from escaping into
+                // an unobserved-task exception.
+                _ = framework.RunOnFrameworkThread(() =>
+                {
+                    // The marshal can land after teardown has begun — Dispose unsubscribes the
+                    // event handlers, but a queued delegate still runs. A cancelled lifetime means
+                    // the plugin is going away, and a settings write during teardown is not worth
+                    // racing Dispose for; the migration simply runs on the next load's first poll.
+                    if (lifetimeToken.IsCancellationRequested)
+                        return;
+
+                    try
+                    {
+                        // `Count: > 0` matters as much as the null test: an empty groups array
+                        // must not burn the one-time flag, or a later config carrying the real
+                        // groups could never migrate this user's consent.
+                        if (config.ItemManifestGroups is { Count: > 0 } groups
+                            && settings.MigrateItemGroupConsent(
+                                groups, settings.IsCategoryEnabled(CategoryKeys.Items)))
+                        {
+                            saveSettings();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Same last-resort net as UploadAsync: a throw in a discarded task would
+                        // surface as an unobserved-task exception long after the context is gone.
+                        log.Error(ex, "Item group consent migration failed.");
+                    }
+                });
+
                 return;
             }
 

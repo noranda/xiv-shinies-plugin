@@ -52,13 +52,17 @@ public static class CollectorRegistry
         Key = CategoryKeys.Items,
         DisplayName = "Relic items",
 
-        // Says plainly that the search covers the character's own storage, retainers included. Only
-        // the counts of the items XIV Shinies named ever leave the machine, but a disclosure that
-        // omitted where the plugin looks would be technically true and practically misleading.
+        // Says plainly that the search covers the character's own storage, retainers included, and
+        // that a zero count is still a reported fact, not silence. Only the counts of the items XIV
+        // Shinies named ever leave the machine, but a disclosure that omitted where the plugin looks
+        // — or that "none of this item" is itself sent — would be technically true and practically
+        // misleading. Also names the per-group choice now that item consent is granted per manifest
+        // group rather than as one all-or-nothing switch.
         WhatGetsSent =
-            "Counts of the specific items XIV Shinies asks about, to prove relic progress — checked " +
-            "across your inventory, armoire, glamour dresser, saddlebag, and retainers. Nothing " +
-            "else is sent.",
+            "Counts of the specific items XIV Shinies asks about — including that you have none of " +
+            "an item — checked across your inventory, armoire, glamour dresser, saddlebag, and " +
+            "retainers. You choose which groups of items to share when XIV Shinies offers them. " +
+            "Nothing else is sent.",
     };
 
     /// <summary>Creates every collector, in the order they will be run.</summary>
