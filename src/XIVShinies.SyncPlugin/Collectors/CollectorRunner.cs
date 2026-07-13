@@ -85,7 +85,13 @@ public static class CollectorRunner
         var sourceNotes = new Dictionary<string, ItemSourceStatus>();
 
         // Built once and shared: every collector sees the same view of the world for this pass.
-        var context = new CollectContext { RemoteConfig = remoteConfig };
+        // EnabledItemGroupKeys carries the user's per-group opt-ins so the item collector scans only
+        // the groups they consented to (CollectContext.ItemManifest unions the enabled groups).
+        var context = new CollectContext
+        {
+            RemoteConfig = remoteConfig,
+            EnabledItemGroupKeys = new HashSet<string>(settings.EnabledItemGroupKeys),
+        };
 
         foreach (var collector in collectors)
         {
