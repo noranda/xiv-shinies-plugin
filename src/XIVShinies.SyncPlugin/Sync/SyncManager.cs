@@ -548,6 +548,21 @@ internal sealed class SyncManager : IDisposable
             snapshot = CollectorRunner.Run(
                 CollectorSelection.For(collectors, due.Categories), settings, config);
 
+            // Bound every category to the contract's caps before anything downstream sees it.
+            // An over-cap payload is rejected whole by the server (400), losing every category
+            // in it; truncating here keeps the rest of the upload alive. `snapshot with { ... }`
+            // rebuilds the record with the bounded dictionary in place, so everything below —
+            // the cost log, the skip reasons, the request build, and the upload-log draft — sees
+            // the same bounded snapshot without any of them needing to know capping happened.
+            var (boundedCollections, droppedByCap) = PayloadCaps.Bound(snapshot.Collections);
+            if (droppedByCap.Count > 0)
+            {
+                snapshot = snapshot with { Collections = boundedCollections };
+
+                foreach (var line in droppedByCap)
+                    log.Warning($"Payload cap: {line}.");
+            }
+
             LogCollectionCost(snapshot, due.Trigger);
 
             // Kept for the settings window. An unlock pass runs only the collectors whose categories
