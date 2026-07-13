@@ -114,6 +114,13 @@ internal sealed class MainWindow : Window, IDisposable
 
     private readonly OnboardingState onboarding = new();
 
+    // Group keys whose "New" badge has been shown during THIS window's lifetime. The moment a new
+    // group is drawn we persist its "seen" flag (so it is gone next session), but we keep drawing its
+    // badge for the rest of the session by remembering it here — otherwise the badge would vanish one
+    // frame after appearing, since the very next frame's rebuild would report it as no longer new.
+    // See DrawCategoryRows for the full lifecycle.
+    private readonly HashSet<string> seenThisSession = new();
+
     // The text currently in the token box. ImGui hands us a `ref string` and rewrites it in place,
     // so this must be a field rather than something rebuilt each frame. Seeded from the saved token
     // in the constructor.
@@ -1694,9 +1701,112 @@ internal sealed class MainWindow : Window, IDisposable
                 if (row.SkipReason is { } reason && CollectSkipReasons.Describe(reason) is { } hint)
                     DrawWarning(hint);
 
+                DrawGroupCheckboxes(row);
+                DrawSourceNotes(row);
+
                 ImGui.Unindent(checkboxColumn);
                 ImGui.Spacing();
             }
+        }
+    }
+
+    /// <summary>
+    /// Draws the per-group consent checkboxes beneath a manifest-driven category, each with a "New"
+    /// badge until the user has seen it, and persists both the toggles and the seen-once flags.
+    /// </summary>
+    /// <remarks>
+    /// The seen-marking is the subtle part. A group arrives from <see cref="CategorySettingsView.Build"/>
+    /// with <c>IsNew = true</c> until its persisted "seen" flag is set. The first frame we draw it we set
+    /// that flag (one write), so every later frame's rebuild reports <c>IsNew = false</c> and this method
+    /// stops writing for that group — the config is saved once per batch of newly-seen groups, never per
+    /// frame (a per-frame save would be a real bug). We also remember the key in <c>seenThisSession</c>
+    /// and keep drawing its badge while it is there, so the badge stays visible for the rest of the
+    /// session instead of blinking out one frame after it appears. The persisted flag still guarantees
+    /// the badge is gone the next time the plugin loads.
+    /// </remarks>
+    private void DrawGroupCheckboxes(CategorySettingsRow row)
+    {
+        // Nothing to draw unless the server sent consent groups for this manifest-driven category.
+        if (row.Groups is not { Count: > 0 } groups)
+            return;
+
+        // A further indent nests the group checkboxes beneath their category's description. Measured
+        // the same way as the category column, inside the ItemInnerSpacing push DrawCategoryRows opened,
+        // so it tracks the same spacing.
+        var groupIndent = ImGui.GetFrameHeight() + ImGui.GetStyle().ItemInnerSpacing.X;
+        ImGui.Indent(groupIndent);
+
+        // Collected while drawing, then persisted once after the loop. Null until the first genuinely
+        // new group is seen, so a row whose groups are all already-seen writes nothing.
+        List<string>? newlySeen = null;
+
+        foreach (var group in groups)
+        {
+            var groupEnabled = group.Enabled;
+
+            // Same `##key` identity trick as the category checkboxes above: the visible label is the
+            // group's, but the widget's ImGui id comes from the unique group key, so two groups that
+            // chose the same label never cross-wire their clicks.
+            if (ImGui.Checkbox($"{group.Label}##group-{group.Key}", ref groupEnabled))
+            {
+                configuration.Settings.SetItemGroupEnabled(group.Key, groupEnabled);
+                configuration.Save();
+            }
+
+            // New this frame: record it to persist below, and remember it for the session so its badge
+            // keeps drawing after the persisted flag flips it un-new on the next rebuild. HashSet.Add
+            // doubles as the dedupe: it returns false once the key is already remembered, so even a
+            // group whose persisted flag somehow never flips can trigger at most one save per session.
+            if (group.IsNew && seenThisSession.Add(group.Key))
+            {
+                (newlySeen ??= new List<string>()).Add(group.Key);
+            }
+
+            // The badge shows while the server still considers the group new OR while we have shown it
+            // earlier this session. TextColored pushes and pops the accent color itself, so it needs no
+            // scope of its own; Brand.Gold is the "shiny" accent used for highlights elsewhere.
+            if (group.IsNew || seenThisSession.Contains(group.Key))
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(Brand.Gold, "New");
+            }
+        }
+
+        // Persist the seen-once flags for every group that was new this frame, in a single save. Because
+        // marking them seen makes the next rebuild report IsNew=false, this runs once per batch of
+        // newly-seen groups rather than every frame.
+        if (newlySeen is not null)
+        {
+            configuration.Settings.MarkItemGroupsSeen(newlySeen);
+            configuration.Save();
+        }
+
+        ImGui.Unindent(groupIndent);
+    }
+
+    /// <summary>
+    /// Draws the per-source scan notes (inventory read live, saddlebag cached, retainers scanned, …)
+    /// beneath a manifest-driven category, as muted text.
+    /// </summary>
+    /// <remarks>
+    /// Shown for any manifest-driven row, whether or not it has consent groups yet: the notes describe
+    /// how each storage source was read this pass, which is worth knowing even before the server sends
+    /// groups. The notes are source-keyed, so nothing here branches on a category or source name — the
+    /// window draws whatever line <see cref="SourceNoteText.Describe"/> hands back and skips the ones it
+    /// returns null for.
+    /// </remarks>
+    private void DrawSourceNotes(CategorySettingsRow row)
+    {
+        if (!row.UsesItemManifest)
+            return;
+
+        // LastSourceNotes is empty until an item pass has run, so before the first scan this draws
+        // nothing. `foreach` over an IReadOnlyDictionary hands back each entry as a KeyValuePair, which
+        // deconstructs straight into (key, value) here.
+        foreach (var (sourceKey, status) in syncManager.LastSourceNotes)
+        {
+            if (SourceNoteText.Describe(sourceKey, status) is { } note)
+                DrawWrapped(note, ImGuiCol.TextDisabled);
         }
     }
 
@@ -1710,6 +1820,9 @@ internal sealed class MainWindow : Window, IDisposable
     /// </remarks>
     private void DrawSelectAll(IReadOnlyList<CategorySettingsRow> rows)
     {
+        // Deliberately reaches category toggles only, never the per-group consent checkboxes: groups are
+        // finer-grained consent the user opts into one at a time, so a blanket "All collections" must not
+        // sweep them on or off.
         var allEnabled = true;
         foreach (var row in rows)
         {

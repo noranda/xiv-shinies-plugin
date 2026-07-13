@@ -45,6 +45,17 @@ public sealed record CategorySettingsRow
     public bool IsEffectivelyOn => UserEnabled && ServerEnabled;
 
     /// <summary>
+    /// True when this row's collector reads the item manifest (see <see cref="ICollector.UsesItemManifest"/>).
+    /// </summary>
+    /// <remarks>
+    /// The window uses this to decide whether to draw per-source scan notes (inventory live, saddlebag
+    /// cached, and so on) beneath the row. It is a superset of "has groups": a manifest-driven collector
+    /// still wants its source notes shown before the server has sent any consent groups, so the window
+    /// cannot infer this from <see cref="Groups"/> being non-null — the collector has to say it directly.
+    /// </remarks>
+    public required bool UsesItemManifest { get; init; }
+
+    /// <summary>
     /// One row per item-manifest consent group, for a manifest-driven collector — or null when this
     /// row has no groups to draw.
     /// </summary>
@@ -140,6 +151,10 @@ public static class CategorySettingsView
                     ? reason
                     : null,
 
+                // Carried straight from the collector's self-description, so the window can show
+                // per-source scan notes for a manifest-driven category even before any groups exist.
+                UsesItemManifest = collector.UsesItemManifest,
+
                 Groups = BuildGroupRows(collector, settings, remoteConfig),
             });
         }
@@ -162,6 +177,13 @@ public static class CategorySettingsView
         var groupRows = new List<ItemGroupRow>();
         foreach (var group in manifestGroups)
         {
+            // A blank key is server data gone wrong, and it can never behave: consent reads treat it
+            // as off, seen-marking skips it (so it would wear a "New" badge forever and re-trigger a
+            // config save every frame), and the consent write would throw. Dropping it here, at the
+            // pure boundary, keeps every one of those paths safe — and testable.
+            if (string.IsNullOrEmpty(group.Key))
+                continue;
+
             groupRows.Add(new ItemGroupRow
             {
                 Key = group.Key,

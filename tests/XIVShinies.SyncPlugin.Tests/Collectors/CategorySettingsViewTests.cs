@@ -186,6 +186,10 @@ public class CategorySettingsViewTests
 
         var rows = CategorySettingsView.Build(new[] {FakeManifestDriven("items")}, OptedIn(), config);
 
+        // The collector's self-reported manifest flag rides through to the row: the window reads it to
+        // decide whether to draw per-source scan notes, independent of whether groups exist.
+        Assert.True(rows[0].UsesItemManifest);
+
         var groups = Assert.Single(rows).Groups;
         Assert.NotNull(groups);
         Assert.Equal(2, groups!.Count);
@@ -257,7 +261,28 @@ public class CategorySettingsViewTests
 
         var rows = CategorySettingsView.Build(new[] {Fake("items")}, OptedIn(), config);
 
+        // Not manifest-driven: the flag is false and no group rows attach.
+        Assert.False(rows[0].UsesItemManifest);
         Assert.Null(rows[0].Groups);
+    }
+
+    // A blank group key is malformed server data that no downstream path can handle: consent reads
+    // treat it as off, seen-marking skips it (a forever-"New" badge that would re-save the config
+    // every frame), and the consent write throws. The view drops it at the boundary; its healthy
+    // siblings still flow.
+    [Fact]
+    public void A_group_with_a_blank_key_is_dropped_and_its_siblings_survive()
+    {
+        var config = RemoteConfig(itemManifestGroups: new[]
+        {
+            Group("", "Broken group"),
+            Group("relic-tools", "Relic tools"),
+        });
+
+        var rows = CategorySettingsView.Build(new[] {FakeManifestDriven("items")}, OptedIn(), config);
+
+        var group = Assert.Single(rows[0].Groups!);
+        Assert.Equal("relic-tools", group.Key);
     }
 
     // THE GATE, extended: a manifest-driven collector for a category this plugin has never heard of

@@ -60,7 +60,7 @@ public static class CollectorRegistry
         // group rather than as one all-or-nothing switch.
         WhatGetsSent =
             "Counts of the specific items XIV Shinies asks about — including that you have none of " +
-            "an item — checked across your inventory, armoire, glamour dresser, saddlebag, and " +
+            "an item — checked across your inventory, Armoire, Glamour Dresser, Saddlebag, and " +
             "retainers. You choose which groups of items to share when XIV Shinies offers them. " +
             "Nothing else is sent.",
 

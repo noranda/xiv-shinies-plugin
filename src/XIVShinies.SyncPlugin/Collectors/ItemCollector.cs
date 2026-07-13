@@ -393,6 +393,17 @@ public sealed unsafe class ItemCollector : ICollector
         // RETAINERS. `.Count` is the number of retainers whose contents the cache remembers; reading
         // it does not touch the map's keys (see the privacy note on TallyRetainers). A count of zero
         // means the player has never had a retainer's contents cached — nothing to read, so unscanned.
+        //
+        // The TOTAL retainer count comes from RetainerManager, so the note can say "3 of 5 scanned"
+        // rather than a bare "3" that hides never-summoned retainers. GetRetainerCount is a count
+        // only — the manager's per-retainer entries (ids, names) are never read, the same privacy
+        // rule TallyRetainers documents. The manager is populated by the game during the session;
+        // until then it reports 0, which is indistinguishable from "has no retainers", so zero is
+        // treated as unknown and the total is simply omitted.
+        var retainerManager = RetainerManager.Instance();
+        var knownTotal = retainerManager is not null ? (int)retainerManager->GetRetainerCount() : 0;
+        int? retainerTotal = knownTotal > 0 ? knownTotal : null;
+
         var retainerCount = finder->RetainerInventories.Count;
         if (retainerCount > 0)
         {
@@ -401,11 +412,16 @@ public sealed unsafe class ItemCollector : ICollector
             {
                 State = SourceStates.Cached,
                 Count = retainerCount,
+                Total = retainerTotal,
             };
         }
         else
         {
-            notes[SourceKeys.Retainers] = new ItemSourceStatus { State = SourceStates.Unscanned };
+            notes[SourceKeys.Retainers] = new ItemSourceStatus
+            {
+                State = SourceStates.Unscanned,
+                Total = retainerTotal,
+            };
         }
     }
 

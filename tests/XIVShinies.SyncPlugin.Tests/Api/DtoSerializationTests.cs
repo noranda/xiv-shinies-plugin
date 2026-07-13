@@ -384,13 +384,17 @@ public class DtoSerializationTests
     }
 
     [Fact]
-    public void ItemSourceStatus_serializes_state_and_optional_count()
+    public void ItemSourceStatus_serializes_state_and_optional_counts()
     {
         var live = new ItemSourceStatus { State = SourceStates.Live };
         var retainers = new ItemSourceStatus { State = SourceStates.Cached, Count = 3 };
+        var partial = new ItemSourceStatus { State = SourceStates.Cached, Count = 3, Total = 5 };
 
         Assert.Equal("""{"state":"live"}""", JsonSerializer.Serialize(live, ApiJson.Options));
         Assert.Equal("""{"state":"cached","count":3}""", JsonSerializer.Serialize(retainers, ApiJson.Options));
+        Assert.Equal(
+            """{"state":"cached","count":3,"total":5}""",
+            JsonSerializer.Serialize(partial, ApiJson.Options));
     }
 
     [Fact]

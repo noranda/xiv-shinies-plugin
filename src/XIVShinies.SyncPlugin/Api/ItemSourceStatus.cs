@@ -24,6 +24,13 @@ public sealed record ItemSourceStatus
     /// whose contents were cached (not live). For other sources, unused.
     /// </summary>
     public int? Count { get; init; }
+
+    /// <summary>
+    /// How many of the source exist in total, when the game can say — omitted from JSON when null.
+    /// For retainers: the character's retainer count, so a reader can tell "3 of 5 scanned" apart
+    /// from "3 of 3". A count only; nothing that identifies an individual retainer travels.
+    /// </summary>
+    public int? Total { get; init; }
 }
 
 /// <summary>

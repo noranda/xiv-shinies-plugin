@@ -305,7 +305,11 @@ main sections above and delete this section.
   still never clears anything, and proof/collection flags remain monotonic.
 - **Per-source scan status.** The sync payload gains an optional `itemSources` object:
   `{"inventory": {"state": "live"}, "saddlebag": {"state": "cached"|"unscanned"},
-  "retainers": {"state": "cached", "count": 3}, "armoire": {"state": "loaded"|"unscanned"},
-  "glamourDresser": {"state": "cached"|"unscanned"}}`. It tells the server which sources
-  contributed to the counts (e.g. a zero while retainers are unscanned is a floor, not
-  truth) and powers "open your saddlebag once" hints.
+  "retainers": {"state": "cached", "count": 3, "total": 5}, "armoire":
+  {"state": "loaded"|"unscanned"}, "glamourDresser": {"state": "cached"|"unscanned"}}`.
+  It tells the server which sources contributed to the counts (e.g. a zero while retainers
+  are unscanned is a floor, not truth) and powers "open your saddlebag once" hints. The
+  retainer entry's `count` is how many retainers the cache remembers; the optional `total`
+  is how many the character has, when the game can say — `3` of `5` scanned means two
+  retainers contribute nothing yet. Both are counts only; nothing identifies an individual
+  retainer.
