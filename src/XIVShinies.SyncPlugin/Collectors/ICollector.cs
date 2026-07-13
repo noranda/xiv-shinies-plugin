@@ -51,6 +51,19 @@ public interface ICollector
     string WhatGetsSent { get; }
 
     /// <summary>
+    /// True when this collection's scope is driven by the server's item manifest, rather than being
+    /// fixed at compile time.
+    /// </summary>
+    /// <remarks>
+    /// The settings window uses this to decide whether to attach per-group consent rows beneath this
+    /// collector's row. It is self-description, the same idea as <see cref="DisplayName"/> and
+    /// <see cref="WhatGetsSent"/>: the window asks the collector about itself instead of comparing
+    /// <see cref="CategoryKey"/> against a hardcoded name, so a future manifest-driven collection gets
+    /// group rows for free just by setting this flag on its own <see cref="CategoryInfo"/>.
+    /// </remarks>
+    bool UsesItemManifest { get; }
+
+    /// <summary>
     /// Reads the facts from the game, or explains why it could not.
     /// </summary>
     /// <param name="context">

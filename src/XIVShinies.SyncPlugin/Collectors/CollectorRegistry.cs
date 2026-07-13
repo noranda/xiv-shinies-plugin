@@ -63,6 +63,10 @@ public static class CollectorRegistry
             "an item — checked across your inventory, armoire, glamour dresser, saddlebag, and " +
             "retainers. You choose which groups of items to share when XIV Shinies offers them. " +
             "Nothing else is sent.",
+
+        // The only collection whose scope comes from the server's item manifest rather than being
+        // fixed at compile time, so it is the one that gets per-group consent rows in settings.
+        UsesItemManifest = true,
     };
 
     /// <summary>Creates every collector, in the order they will be run.</summary>

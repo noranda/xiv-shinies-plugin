@@ -83,6 +83,11 @@ public sealed class ExcelUnlockCollector<TRow> : ICollector, IUnlockAware
     public string WhatGetsSent => info.WhatGetsSent;
 
     /// <inheritdoc/>
+    // Sheet-backed collections are fixed in scope at compile time (every row in the sheet is a
+    // candidate), never driven by the server's item manifest.
+    public bool UsesItemManifest => info.UsesItemManifest;
+
+    /// <inheritdoc/>
     // Each collector recognizes only its own sheet, so routing an unlock needs no lookup table and
     // no branch on category names. `Is<TRow>()` compares the row type the game reported against the
     // one this collector was built for.

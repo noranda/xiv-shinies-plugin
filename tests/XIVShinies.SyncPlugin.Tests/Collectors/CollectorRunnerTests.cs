@@ -36,6 +36,10 @@ public class CollectorRunnerTests
 
         public string WhatGetsSent => $"Facts about {CategoryKey}.";
 
+        // The runner never reads this flag either — it only matters to the settings window's group
+        // rows — so the fake reports the fixed-scope default.
+        public bool UsesItemManifest => false;
+
         public int CollectCallCount { get; private set; }
 
         public CollectContext? LastContext { get; private set; }

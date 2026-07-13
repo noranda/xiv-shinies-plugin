@@ -113,6 +113,9 @@ public sealed unsafe class ItemCollector : ICollector
     public string WhatGetsSent => info.WhatGetsSent;
 
     /// <inheritdoc/>
+    public bool UsesItemManifest => info.UsesItemManifest;
+
+    /// <inheritdoc/>
     public CollectResult Collect(CollectContext context)
     {
         // Everything below dereferences raw game memory. Reading it off the framework thread races
