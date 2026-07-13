@@ -315,4 +315,93 @@ public class CollectorRunnerTests
         Assert.NotNull(snapshot.Durations);
         Assert.Empty(snapshot.Durations);
     }
+
+    [Fact]
+    public void Run_merges_source_notes_into_the_snapshot()
+    {
+        var sourceNotes = new Dictionary<string, ItemSourceStatus>
+        {
+            ["inventory"] = new ItemSourceStatus { State = SourceStates.Live },
+            ["saddlebag"] = new ItemSourceStatus { State = SourceStates.Unscanned },
+        };
+        var collector = new FakeCollector(
+            "items", () => CollectResult.Items(
+                new[] { new ItemPossession { Id = 7851, Count = 1, Fresh = true } },
+                sourceNotes));
+
+        var snapshot = CollectorRunner.Run(new[] { collector }, OptedIn("items"), RemoteConfig());
+
+        Assert.NotNull(snapshot.SourceNotes);
+        Assert.Equal(2, snapshot.SourceNotes.Count);
+        Assert.Equal(SourceStates.Live, snapshot.SourceNotes["inventory"].State);
+        Assert.Equal(SourceStates.Unscanned, snapshot.SourceNotes["saddlebag"].State);
+    }
+
+    [Fact]
+    public void Run_collects_empty_source_notes_when_no_collector_reports_them()
+    {
+        var collector = Collecting(UnknownCategory, 42);
+
+        var snapshot = CollectorRunner.Run(new[] { collector }, OptedIn(UnknownCategory), RemoteConfig());
+
+        Assert.NotNull(snapshot.SourceNotes);
+        Assert.Empty(snapshot.SourceNotes);
+    }
+
+    [Fact]
+    public void Run_ignores_a_skipped_collector_when_merging_source_notes()
+    {
+        // A skip carries no source notes (a collector that could not read its source has nothing
+        // to say about any storage location), so the snapshot holds only the collected results'
+        // notes. This pins the merge to the collected branch of the runner.
+        var notes = new Dictionary<string, ItemSourceStatus>
+        {
+            ["inventory"] = new ItemSourceStatus { State = SourceStates.Live },
+        };
+        var skipping = new FakeCollector("mounts", () => CollectResult.Skipped("sheet_unavailable"));
+        var collecting = new FakeCollector(
+            "items", () => CollectResult.Items(
+                new[] { new ItemPossession { Id = 7851, Count = 1, Fresh = true } },
+                notes));
+
+        var snapshot = CollectorRunner.Run(
+            new ICollector[] { skipping, collecting }, OptedIn("mounts", "items"), RemoteConfig());
+
+        Assert.Single(snapshot.SourceNotes);
+        Assert.Equal(SourceStates.Live, snapshot.SourceNotes["inventory"].State);
+    }
+
+    [Fact]
+    public void Run_merges_multiple_collectors_source_notes_with_last_one_winning()
+    {
+        var notes1 = new Dictionary<string, ItemSourceStatus>
+        {
+            ["inventory"] = new ItemSourceStatus { State = SourceStates.Live },
+        };
+        var notes2 = new Dictionary<string, ItemSourceStatus>
+        {
+            ["inventory"] = new ItemSourceStatus { State = SourceStates.Cached },
+            ["saddlebag"] = new ItemSourceStatus { State = SourceStates.Unscanned },
+        };
+
+        var collector1 = new FakeCollector(
+            "achievements", () => CollectResult.Ids(new uint[] { 1 }));
+        var collector2 = new FakeCollector(
+            "items", () => CollectResult.Items(
+                new[] { new ItemPossession { Id = 7851, Count = 1, Fresh = true } },
+                notes1));
+        var collector3 = new FakeCollector(
+            "mounts", () => CollectResult.Items(
+                new[] { new ItemPossession { Id = 7851, Count = 1, Fresh = true } },
+                notes2));
+
+        var snapshot = CollectorRunner.Run(
+            new ICollector[] { collector1, collector2, collector3 },
+            OptedIn("achievements", "items", "mounts"),
+            RemoteConfig());
+
+        // collector3's notes2 should have overwritten inventory state from collector2
+        Assert.Equal(SourceStates.Cached, snapshot.SourceNotes["inventory"].State);
+        Assert.Equal(SourceStates.Unscanned, snapshot.SourceNotes["saddlebag"].State);
+    }
 }

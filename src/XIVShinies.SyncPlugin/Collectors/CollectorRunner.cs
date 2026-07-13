@@ -43,6 +43,20 @@ public sealed record CollectionSnapshot
     // dictionary is the honest default for "nothing was measured".
     public IReadOnlyDictionary<string, TimeSpan> Durations { get; init; } =
         new Dictionary<string, TimeSpan>();
+
+    /// <summary>
+    /// Per-source scan status (inventory live, saddlebag cached, retainers unscanned, etc.),
+    /// merged from every collector that reported source notes this pass.
+    /// </summary>
+    /// <remarks>
+    /// A dictionary (never null) because empty is meaningful: "no collector reported any source
+    /// status this pass" is a real answer, and callers can iterate it unconditionally. The merge
+    /// rules live at the merge site in <see cref="CollectorRunner.Run"/>.
+    /// </remarks>
+    // Not `required`: a snapshot assembled in a test need not care about source notes, and an empty
+    // dictionary is the honest default for "nothing was reported".
+    public IReadOnlyDictionary<string, ItemSourceStatus> SourceNotes { get; init; } =
+        new Dictionary<string, ItemSourceStatus>();
 }
 
 /// <summary>
@@ -68,6 +82,7 @@ public static class CollectorRunner
         var collections = new Dictionary<string, JsonNode>();
         var skipped = new Dictionary<string, string>();
         var durations = new Dictionary<string, TimeSpan>();
+        var sourceNotes = new Dictionary<string, ItemSourceStatus>();
 
         // Built once and shared: every collector sees the same view of the world for this pass.
         var context = new CollectContext { RemoteConfig = remoteConfig };
@@ -117,6 +132,18 @@ public static class CollectorRunner
                 // Note this includes an EMPTY list, which is a real fact ("I looked, there was
                 // nothing"), unlike a skip.
                 collections[key] = result.Facts!;
+
+                // Merge source notes from this collector. Source-keyed: if two collectors both report
+                // on the same source (e.g., both describe inventory), the last one wins because they
+                // describe the same physical storage location. The snapshot iteration order means
+                // "last" is the order collectors were registered.
+                if (result.SourceNotes is not null)
+                {
+                    foreach (var (sourceKey, status) in result.SourceNotes)
+                    {
+                        sourceNotes[sourceKey] = status;
+                    }
+                }
             }
             else
             {
@@ -129,6 +156,7 @@ public static class CollectorRunner
             Collections = collections,
             Skipped = skipped,
             Durations = durations,
+            SourceNotes = sourceNotes,
         };
     }
 }

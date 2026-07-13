@@ -75,6 +75,23 @@ public sealed record SyncRequest
     /// </para>
     /// </remarks>
     public required Dictionary<string, JsonNode> Collections { get; init; }
+
+    /// <summary>
+    /// Per-source scan status (inventory live, retainers cached, armoire loaded, etc.), or null when
+    /// not present. Optional on the wire: omitted when null or empty.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Accompanies item counts: it tells the server how each storage location was read, which is
+    /// what makes a low or zero count judgeable (was the saddlebag ever scanned?). Other
+    /// categories are single unlock flags with no physical storage locations to describe.
+    /// </para>
+    /// <para>
+    /// Source-keyed, never category-keyed: any collector may report on any source without special
+    /// casing by category name. A future category can use the same infrastructure.
+    /// </para>
+    /// </remarks>
+    public Dictionary<string, ItemSourceStatus>? ItemSources { get; init; }
 }
 
 /// <summary>

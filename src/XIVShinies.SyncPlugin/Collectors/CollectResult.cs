@@ -90,6 +90,17 @@ public sealed record CollectResult
     /// <summary>The collected facts as JSON, or null when the collector skipped.</summary>
     public JsonNode? Facts { get; private init; }
 
+    /// <summary>
+    /// Per-source scan status (inventory live, saddlebag unscanned, retainers cached), or null when
+    /// no source status is reported. Only valid when <see cref="WasCollected"/> is true.
+    /// </summary>
+    /// <remarks>
+    /// Source-keyed, never category-keyed: a note describes a physical storage location, not a
+    /// collection, so nothing downstream branches on which collector said it. These are ONE
+    /// collector's notes; the runner merges every collector's notes into the snapshot.
+    /// </remarks>
+    public IReadOnlyDictionary<string, ItemSourceStatus>? SourceNotes { get; private init; }
+
     /// <summary>True when facts were read (possibly an empty list).</summary>
     public bool WasCollected => SkipReason is null && Facts is not null;
 
@@ -122,5 +133,19 @@ public sealed record CollectResult
 
     /// <summary>Facts for the <c>items</c> category, which carries objects rather than IDs.</summary>
     public static CollectResult Items(IReadOnlyList<ItemPossession> items) =>
-        new() { Facts = SyncFacts.Items(items) };
+        Items(items, sourceNotes: null);
+
+    /// <summary>
+    /// Facts for the <c>items</c> category, along with per-source scan status (which containers were
+    /// live, cached, or unscanned).
+    /// </summary>
+    /// <param name="items">The item possession facts.</param>
+    /// <param name="sourceNotes">
+    /// Per-source scan status, or null when no status is reported. Source-keyed: any collector may
+    /// report on any source without special-casing by category.
+    /// </param>
+    public static CollectResult Items(
+        IReadOnlyList<ItemPossession> items,
+        IReadOnlyDictionary<string, ItemSourceStatus>? sourceNotes) =>
+        new() { Facts = SyncFacts.Items(items), SourceNotes = sourceNotes };
 }

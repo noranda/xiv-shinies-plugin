@@ -382,4 +382,48 @@ public class DtoSerializationTests
 
         Assert.Null(config.ItemManifestGroups);
     }
+
+    [Fact]
+    public void ItemSourceStatus_serializes_state_and_optional_count()
+    {
+        var live = new ItemSourceStatus { State = SourceStates.Live };
+        var retainers = new ItemSourceStatus { State = SourceStates.Cached, Count = 3 };
+
+        Assert.Equal("""{"state":"live"}""", JsonSerializer.Serialize(live, ApiJson.Options));
+        Assert.Equal("""{"state":"cached","count":3}""", JsonSerializer.Serialize(retainers, ApiJson.Options));
+    }
+
+    [Fact]
+    public void SyncRequest_with_item_sources_carries_them_under_itemSources()
+    {
+        // glamourDresser doubles as the proof that a mid-word capital in a source key reaches the
+        // wire verbatim; the state pairings mirror the contract's examples (armoire is the one
+        // source that uses "loaded").
+        var request = MinimalRequest() with
+        {
+            ItemSources = new Dictionary<string, ItemSourceStatus>
+            {
+                ["glamourDresser"] = new ItemSourceStatus { State = SourceStates.Cached },
+                ["armoire"] = new ItemSourceStatus { State = SourceStates.Loaded },
+                ["retainers"] = new ItemSourceStatus { State = SourceStates.Cached, Count = 2 },
+            },
+        };
+
+        var json = Serialize(request);
+
+        Assert.True(json.ContainsKey("itemSources"));
+        var sources = json["itemSources"]!.AsObject();
+        Assert.Equal("cached", sources["glamourDresser"]!["state"]!.GetValue<string>());
+        Assert.Equal("loaded", sources["armoire"]!["state"]!.GetValue<string>());
+        Assert.Equal("cached", sources["retainers"]!["state"]!.GetValue<string>());
+        Assert.Equal(2, sources["retainers"]!["count"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void SyncRequest_omits_itemSources_when_it_is_null()
+    {
+        var json = Serialize(MinimalRequest());
+
+        Assert.False(json.ContainsKey("itemSources"));
+    }
 }
