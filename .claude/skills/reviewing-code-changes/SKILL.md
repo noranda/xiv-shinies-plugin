@@ -7,10 +7,12 @@ description: Use when the user asks to review code changes, audit a branch, QA r
 
 ## Overview
 
-Dispatch parallel subagent reviewers, consolidate findings by severity, apply fixes, verify.
-Reviewers cover four dimensions tuned to this repo: **C# correctness + API-contract
-conformance**, **Dalamud compliance + safety**, **comments/conventions/tests**, and a
-**completeness census** for any cross-cutting invariant.
+Dispatch parallel subagent reviewers, consolidate findings by severity, apply fixes, verify,
+then **sweep the comments last**. Reviewers cover four dimensions tuned to this repo: **C#
+correctness + API-contract conformance**, **Dalamud compliance + safety**,
+**conventions + test coverage**, and a **completeness census** for any cross-cutting invariant.
+**Comments are not one of them** — they get their own single-purpose pass at the end (step 7.5),
+for reasons the "Why the comment sweep runs last" section spells out.
 
 **The diff is the entry point, not the boundary.** The most dangerous defects in a changeset
 are not in the lines that changed — they are in the lines that _should_ have changed and
@@ -44,9 +46,11 @@ digraph review_flow {
     consolidate [label="5. Consolidate findings by severity" shape=box];
     fix [label="6. Apply fixes for\nCRITICAL + IMPORTANT" shape=box];
     verify [label="7. dotnet build + dotnet test\n(+ note in-game QA for game surfaces)" shape=box];
+    sweep [label="7.5 COMMENT SWEEP (last)\nsingle-purpose subagent over the\nWHOLE uncommitted diff" shape=box style=bold];
     report [label="8. Report summary to user" shape=box];
 
-    gather -> read -> conventions -> characterize -> dispatch -> consolidate -> fix -> verify -> report;
+    gather -> read -> conventions -> characterize -> dispatch -> consolidate -> fix -> verify -> sweep -> report;
+    sweep -> fix [label="any comment fixed?\nre-verify, re-sweep" style=dashed];
 }
 ```
 
@@ -101,6 +105,11 @@ compliance rules); and a **structured output format** (Strengths, Issues by seve
 
 **Model:** use `opus` for reviewers — they need judgment and broad understanding.
 
+> **Comments are NOT a dimension here.** Do not fold "check the comments" into any of these
+> reviewers' mandates — see step 7.5. A reviewer carrying both correctness and comments will
+> spend its judgment on correctness and hand back comment findings as an afterthought, and
+> everything it *does* find you are about to invalidate by writing more comments while you fix.
+
 #### Reviewer 0: Completeness / Census (one per cross-cutting invariant)
 
 **Mandate:** prove the invariant holds at EVERY site, or list where it doesn't.
@@ -149,13 +158,13 @@ in CLAUDE.md's **"Dalamud compliance"** section. Enumerate each rule and mark ap
 
 Treat any violation of a hard rule as **CRITICAL** — these gate official-repo approval and some are ban-enforced.
 
-#### Reviewer 3: Comments, conventions & test coverage
+#### Reviewer 3: Conventions & test coverage
 
-**Comments (a baked-in requirement of this repo — CLAUDE.md rule 2):**
-- Every new non-trivial construct is commented for a **beginner AND a contributor** — what it *is*, why it's here, what the C#/Dalamud syntax means. Under-commented new code is an **IMPORTANT** finding here, not a nit.
-- Comments are **accurate, professional, durable** — no "note to self" phrasing, and **no transient/implementation references** (task/phase numbers, private-repo paths, `[Design DN]` tags) in committed comments or shipped strings.
-- New C# concepts a React dev wouldn't know are explained (a brief plain-language note; React analogies are welcome but optional in code comments).
-- If the change is substantial, confirm a **learning summary** was produced per the `/learning-summary` skill.
+**Comments are out of scope for this reviewer** — step 7.5 owns them. The one exception:
+*missing* comments. Flag **under-commented new code** as IMPORTANT (heavy beginner+contributor
+comments are a project requirement), but say nothing about the wording of the comments that
+are there. Also confirm a **learning summary** was produced (per `/learning-summary`) if the
+change is substantial.
 
 **Conventions:**
 - `ImplicitUsings` off → explicit `using`s; file-scoped namespaces; `using`s outside the namespace; `System.*` first.
@@ -212,10 +221,79 @@ explicitly** and list the in-game QA steps needed — do NOT imply the build/tes
 classified ✓, zero un-reviewed sites. "We fixed the ones we found" ≠ "we found them all";
 re-grep to confirm no site of the pattern remains unhandled.
 
+### 7.5 Comment Sweep — the last gate, every time
+
+**Run this AFTER every fix is applied and the build is green.** One `general-purpose` subagent
+on `opus`, whose ONLY job is comments. Not a shared mandate, not a grep, not something you do
+yourself while tired at the end of a long session.
+
+#### Why it runs last (this is the whole point)
+
+- **Fixing invalidates the earlier review.** Steps 6 and 7 have you *writing comments* — on new
+  code, and on code whose behavior just changed. Those comments were never reviewed by anybody.
+  In practice this is where most violations are born: a comment written to explain a fix, framed
+  against the thing it fixed.
+- **A true comment can rot mid-session.** A comment can be accurate when written and false two
+  fixes later, because a fix removed the state it described. Nothing catches that except a pass
+  over the *final* text.
+- **A shared mandate loses to correctness.** A reviewer asked for correctness AND comments will
+  find the bug and skim the prose. Give it one job.
+
+#### The sweep
+
+Feed it the complete uncommitted diff (`git diff HEAD`, plus `git status -u --short` for new
+files) — **not just the files you touched during the fix round**, because the sweep must judge
+comments as they now read, together.
+
+```text
+Read CLAUDE.md's working-style rule 2 first. Your ONLY job is to find comments that violate it.
+Examine EVERY added or modified comment line in `git diff HEAD` — src/ AND tests/, inline and
+XML doc alike. A comment must document the code AS IT IS, for a reader who has never seen any
+earlier version. Flag a comment if it:
+
+1. Narrates the diff or a prior state — "no longer", "used to", "previously", "formerly",
+   "this replaces", "instead of the old", "rather than before", "unchanged from before",
+   "now uses/draws/gated", "moved out of", "pulled out of", "was X, is now Y".
+2. References history or process — task/phase numbers, version numbers, release ordering,
+   a design doc, a review finding, "as discussed".
+3. Argues with a reviewer instead of stating the durable fact — "this is correct because…",
+   "nothing else pins this", "note this is safe", any prose aimed at someone auditing a diff.
+4. Describes a state the code can NO LONGER REACH (i.e. is now factually wrong). Verify each
+   claim against the surrounding code — do not take the comment's word for it.
+5. Is redundant — the same rationale re-derived in two or more places. Name the canonical home.
+
+NOT a violation: a mechanism contrast that is TRUE AT RUNTIME today ("painted through the draw
+list rather than a second Text call, so the layout cursor is not advanced"; "a copy, not the
+live list"). These describe how the code works now. Do not flag them.
+
+[Give it the behavioral context it needs to judge rule 4: what this change did, what was
+deleted, what states are now unreachable.]
+
+For EACH violation: file:line, the exact comment text, the rule it breaks, and a suggested
+replacement stating the durable fact. End with a count.
+```
+
+**If the sweep finds anything, fix it, re-run `dotnet build` + `dotnet test`, and sweep
+again** — your fixes are new comments, and they are exactly as suspect as the ones they
+replace. Iterate until a sweep comes back clean.
+
+#### The grep is a hint, never the check
+
+```bash
+git diff HEAD -U0 | grep -E '^\+' | grep -iE '(//|///).*(no longer|used to |previously|formerly|this replaces|instead of the old|unchanged from before|an earlier (design|version)|now (uses|draws|returns|gated)|changed (from|to)|pulled out of|moved (out of|from))'
+```
+
+Useful for a fast look, but **it is not the gate and never has been**. It keys on phrasing, and
+the violations that survive are the ones that don't use any of these words — *"exactly as it
+does for a user upgrading from a build that had no group checkboxes"* sails straight through,
+and a comment that is simply **false now** matches nothing at all. A clean grep proves nothing.
+Run the sweep.
+
 ### 8. Report
 
 Show the user: the consolidated findings table; which fixes were applied; which items were
-deferred and why; the `dotnet build` + `dotnet test` results; and any in-game QA still required.
+deferred and why; the `dotnet build` + `dotnet test` results; **the comment sweep's result**
+(and how many rounds it took to come back clean); and any in-game QA still required.
 If every reviewer found nothing, "All reviewers passed with no findings" is a valid outcome.
 
 ## Adapting Reviewer Focus
@@ -242,3 +320,8 @@ If every reviewer found nothing, "All reviewers passed with no findings" is a va
 | Claiming a game-touching change is "verified" by build/test | The suite can't run game services. Call out the required in-game QA explicitly. |
 | Skipping a finding because it's "pre-existing" | Never an excuse — fix the real issue and every instance of the pattern. |
 | Sequential reviewer dispatch | One message, multiple `Agent` calls, so they run in parallel. |
+| Reviewing comments **before** applying fixes | The fixes write new comments nobody has read, and they are the likeliest violations of all. Sweep last (7.5). |
+| Folding comments into a correctness reviewer's mandate | It will find the bug and skim the prose. One reviewer, one job. |
+| Treating a clean grep as a clean comment check | The grep matches phrasing. A comment that is simply FALSE now matches nothing. Run the sweep. |
+| Sweeping once and shipping | Your comment fixes are new comments. Re-sweep until a round comes back clean. |
+| Assuming a comment that was true when written is still true | A later fix can make it unreachable. Rule 4 exists for exactly this. |

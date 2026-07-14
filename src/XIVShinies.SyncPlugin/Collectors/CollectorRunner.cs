@@ -86,11 +86,13 @@ public static class CollectorRunner
 
         // Built once and shared: every collector sees the same view of the world for this pass.
         // EnabledItemGroupKeys carries the user's per-group opt-ins so the item collector scans only
-        // the groups they consented to (CollectContext.ItemManifest unions the enabled groups).
+        // the groups they consented to (CollectContext.ItemManifest unions the enabled groups). Taken
+        // as a snapshot, because the user can tick a group's checkbox on the UI thread while this pass
+        // is running and the live list would not survive being read and written at once.
         var context = new CollectContext
         {
             RemoteConfig = remoteConfig,
-            EnabledItemGroupKeys = new HashSet<string>(settings.EnabledItemGroupKeys),
+            EnabledItemGroupKeys = settings.SnapshotEnabledItemGroupKeys(),
         };
 
         foreach (var collector in collectors)

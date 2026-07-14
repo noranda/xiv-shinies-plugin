@@ -60,10 +60,8 @@ public sealed record CollectContext
     /// The only item IDs the plugin may check possession of, truncated to
     /// <see cref="MaxManifestItems"/>. Empty when the server has not told us yet, in which case
     /// an item collector has nothing to do. When the server sends groups, this is the union of
-    /// enabled groups; when groups are null, this is the flat manifest (older server fallback).
+    /// the enabled ones; otherwise it is the flat manifest, gated by the category toggle alone.
     /// </summary>
-    // When groups are present, we union their ids (with dedup) instead of using the flat manifest.
-    // When groups are null, we fall back to the flat manifest path unchanged.
     // Recomputed on each read rather than stored; collectors read it once per pass.
     public IReadOnlyList<uint> ItemManifest
     {
@@ -73,16 +71,15 @@ public sealed record CollectContext
             if (RemoteConfig is null)
                 return Array.Empty<uint>();
 
-            // When the server sends groups, the manifest is the union of enabled groups.
-            // Otherwise, fall back to the flat manifest (older server, no groups).
-            var groups = RemoteConfig.ItemManifestGroups;
-            if (groups is not null)
-            {
+            // `is { Count: > 0 }` folds the null test and the empty test together, because the two
+            // mean the same thing here: a server offering no groups at all is not asking the user to
+            // choose between any, so the flat manifest is what it wants scanned. Treating an empty
+            // array as "groups exist, and none are enabled" instead would silently scan nothing while
+            // the server was plainly asking for the flat list. It is also the reading the one-time
+            // consent migration takes (see SyncManager), and the two must not disagree.
+            if (RemoteConfig.ItemManifestGroups is { Count: > 0 })
                 return GetGroupUnionManifest();
-            }
 
-            // Flat manifest path (older server or new server with no groups): use exactly the
-            // same logic as before — return the flat manifest, truncating if needed.
             var manifest = RemoteConfig.ItemManifest;
             if (manifest.Count <= MaxManifestItems)
                 return manifest;

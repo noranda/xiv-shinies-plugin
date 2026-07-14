@@ -30,6 +30,25 @@ Two rules are non-negotiable for all work in this repo:
    write them as durable documentation. Prefer clarity over brevity — this codebase doubles
    as the maintainer's C# learning material and as onboarding for contributors.
 
+   **Comments describe the code as it is — never as it changed.** A comment is read by
+   someone who has never seen any earlier version, so anything framed against a previous
+   state is noise to them and rots as soon as the code moves again. This includes version
+   numbers, release ordering, phase/task references, and — the recurring offender —
+   *diff narration*: describing a choice in contrast to the thing it replaced. Write the
+   durable fact instead:
+
+   | ❌ Diff narration                                                  | ✅ Durable fact                                                     |
+   | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
+   | `// Drawn at the normal text color rather than muted.`             | `// This is the consent disclosure, so it draws at full contrast.` |
+   | `// At the default scale this is unchanged from before.`           | `// At the default scale this is one TextColored call.`            |
+   | `// This replaces an earlier design that only read the cache when…`| `// Summing is what lets a total include copies on a retainer.`     |
+   | `// Now uses HasItem before GetItemCount.`                         | `// GetItemCount's behavior for an untracked id is undocumented.`   |
+
+   Rule of thumb: if a sentence only makes sense to someone who saw the diff, delete it.
+   The exception is a genuine mechanism contrast that is still true today (e.g. "painting
+   through the draw list rather than a second `Text` call, so the layout cursor is not
+   advanced") — that explains *how the code works now*, not what it used to be.
+
 ## What this is
 
 A Dalamud plugin (API level 15, `Dalamud.NET.Sdk/15.0.0`, .NET 10) scaffolded from

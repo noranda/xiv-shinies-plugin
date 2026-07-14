@@ -127,6 +127,15 @@ public sealed unsafe class ItemCollector : ICollector
         if (context.RemoteConfig is null)
             return CollectResult.Skipped(CollectSkipReasons.NoRemoteConfig);
 
+        // The server offers consent groups and the user has switched all of them off. Nothing may be
+        // looked for, so nothing is looked at — and a collection nothing was read for must say so
+        // rather than report an empty set of facts, which would read as "your inventory was checked
+        // and you own none of these". The settings window turns this reason into the one action that
+        // resolves it (see CollectSkipReasons.Describe). The rule itself is pure, and lives in
+        // ManifestConsent so it can be unit-tested; this class cannot be, as it reads game memory.
+        if (ManifestConsent.GroupsOfferedButNoneEnabled(context))
+            return CollectResult.Skipped(CollectSkipReasons.NoItemGroupsEnabled);
+
         // Read the computed manifest once: it is recomputed on each property read, and the scan below
         // must see one stable list.
         var manifest = context.ItemManifest;

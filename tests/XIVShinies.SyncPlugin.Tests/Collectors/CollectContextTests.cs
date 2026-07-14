@@ -135,6 +135,27 @@ public class CollectContextTests
         Assert.Equal(new uint[] { 1, 2 }, context.ItemManifest);
     }
 
+    // An EMPTY groups array means the same as no groups array: the server is asking the user to choose
+    // between no groups at all, so the flat manifest is what it wants scanned. Reading it as "there are
+    // groups, and none of them are enabled" would scan nothing while the server was plainly asking for
+    // the list it sent.
+    [Fact]
+    public void An_empty_group_list_falls_back_to_the_flat_manifest_too()
+    {
+        var config = ConfigWith(new uint[] { 1, 2 }) with
+        {
+            ItemManifestGroups = Array.Empty<ItemManifestGroup>(),
+        };
+
+        var context = new CollectContext
+        {
+            RemoteConfig = config,
+            EnabledItemGroupKeys = new HashSet<string>(),
+        };
+
+        Assert.Equal(new uint[] { 1, 2 }, context.ItemManifest);
+    }
+
     // The grouped path has its own cap: a hostile or broken backend could stuff millions of ids
     // into a single group, so the union stops collecting exactly at the cap and ignores the rest.
     [Fact]

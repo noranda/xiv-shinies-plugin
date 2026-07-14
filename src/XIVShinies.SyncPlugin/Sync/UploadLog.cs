@@ -349,14 +349,17 @@ public static class UploadLogText
             return null;
 
         var text = string.Join(" · ", parts);
+
+        // Three periods, not the single "…" glyph — see MainWindow's Verify label for why.
         return text.Length <= UploadLogEntry.MaxServerStringLength
             ? text
-            : text[..UploadLogEntry.MaxServerStringLength] + "…";
+            : text[..UploadLogEntry.MaxServerStringLength] + "...";
     }
 
     /// <summary>
     /// True when the outcome is only a delay the plugin handles by itself (it will retry later).
-    /// The log renders these muted: they need no action, unlike refusals, which render red.
+    /// The log draws these at the normal text color: they need no action, unlike refusals, which
+    /// render red.
     /// </summary>
     public static bool IsDeferral(ApiStatus status) =>
         status is ApiStatus.RateLimited or ApiStatus.SyncDisabled or ApiStatus.NetworkError;

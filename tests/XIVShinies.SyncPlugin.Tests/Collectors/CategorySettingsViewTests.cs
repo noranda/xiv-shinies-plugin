@@ -186,8 +186,9 @@ public class CategorySettingsViewTests
 
         var rows = CategorySettingsView.Build(new[] {FakeManifestDriven("items")}, OptedIn(), config);
 
-        // The collector's self-reported manifest flag rides through to the row: the window reads it to
-        // decide whether to draw per-source scan notes, independent of whether groups exist.
+        // The collector's self-reported manifest flag rides through to the row. It is the seam the views
+        // key their manifest-driven behavior on: ReadStatusView suppresses such a collection's
+        // read-status line while a container line stands in for it.
         Assert.True(rows[0].UsesItemManifest);
 
         var groups = Assert.Single(rows).Groups;
@@ -261,7 +262,8 @@ public class CategorySettingsViewTests
 
         var rows = CategorySettingsView.Build(new[] {Fake("items")}, OptedIn(), config);
 
-        // Not manifest-driven: the flag is false and no group rows attach.
+        // Not manifest-driven: the flag is false, so no group rows attach — the server's groups belong to
+        // whichever collection announced itself, and this one did not.
         Assert.False(rows[0].UsesItemManifest);
         Assert.Null(rows[0].Groups);
     }

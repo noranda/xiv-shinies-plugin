@@ -26,6 +26,14 @@ public static class CollectSkipReasons
     public const string InventoryUnavailable = "inventory_unavailable";
 
     /// <summary>
+    /// The server offered consent groups for this collection and the user has none of them switched
+    /// on, so there is nothing the collection is allowed to look for. A skip rather than an empty
+    /// result, because no container was ever opened: reporting facts here would claim a scan that did
+    /// not happen, and the user would be told the collection was read when it was not.
+    /// </summary>
+    public const string NoItemGroupsEnabled = "no_item_groups_enabled";
+
+    /// <summary>
     /// The achievements list has never been requested from the server this session, so the game
     /// cannot answer which achievements are complete. The user fixes this by opening their
     /// Achievements window once; the settings UI turns this reason into that hint.
@@ -33,7 +41,7 @@ public static class CollectSkipReasons
     public const string AchievementListNotLoaded = "achievement_list_not_loaded";
 
     /// <summary>
-    /// Turns a skip reason into a sentence for the settings window, or null if it is not worth saying.
+    /// Turns a skip reason into advice for the settings window, or null if it is not worth saying.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -44,22 +52,32 @@ public static class CollectSkipReasons
     /// collector that reports the same reason gets the same hint for free.
     /// </para>
     /// <para>
+    /// Every string returned here is a <b>phrase, not a standalone sentence</b>: it is drawn after the
+    /// category's own display name, as "<c>{DisplayName}: {phrase}</c>" (see
+    /// <see cref="ReadStatusView"/>). A new reason's copy must complete that pattern, and — because
+    /// nothing happens on its own; the plugin cannot see the user open a window — must name the one
+    /// in-game action that resolves it.
+    /// </para>
+    /// <para>
     /// An unrecognized reason returns null rather than the raw code — a wire string like
-    /// <c>"collector_error"</c> means nothing to a player, and a category that simply could not be
-    /// read this pass is not something they can act on.
+    /// <c>"collector_error"</c> means nothing to a player. The category is still reported as unread;
+    /// there is simply no action to offer alongside it.
     /// </para>
     /// </remarks>
     public static string? Describe(string reason) => reason switch
     {
-        // Ends with the follow-up action, because nothing happens on its own: the plugin cannot
-        // see the window open, so the user must trigger the re-read themselves.
         AchievementListNotLoaded =>
-            "Open your Achievements window in game once, so the game will tell the plugin which " +
-            "achievements you have earned — then press Sync now.",
+            "not read yet — open your Achievements window in game once, then press Sync now.",
 
-        NoRemoteConfig => "Waiting for XIV Shinies to say which items to look for.",
+        NoRemoteConfig =>
+            "not read yet — waiting for XIV Shinies to say which items to look for.",
 
-        InventoryUnavailable => "Log in to a character so your inventory can be read.",
+        InventoryUnavailable =>
+            "not read yet — log in to a character so your inventory can be read.",
+
+        NoItemGroupsEnabled =>
+            "not read — none of its groups are switched on. Tick at least one under Collections to " +
+            "include it.",
 
         // "disabled" needs no explanation: the checkbox beside it already says so. "collector_error"
         // and "sheet_unavailable" are bugs or transient game states the user cannot do anything about.

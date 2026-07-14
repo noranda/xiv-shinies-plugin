@@ -382,8 +382,8 @@ public class UploadLogTests
         var text = UploadLogText.IssuesText(error);
 
         Assert.NotNull(text);
-        Assert.Equal(UploadLogEntry.MaxServerStringLength + 1, text!.Length); // +1 for the ellipsis
-        Assert.EndsWith("…", text);
+        Assert.Equal(UploadLogEntry.MaxServerStringLength + 3, text!.Length); // +3 for the ellipsis
+        Assert.EndsWith("...", text);
     }
 
     [Fact]

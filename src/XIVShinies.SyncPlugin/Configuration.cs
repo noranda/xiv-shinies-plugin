@@ -37,7 +37,14 @@ public class Configuration : IPluginConfiguration
     /// Convenience wrapper so callers can persist changes without reaching through the plugin
     /// interface themselves. Call this after mutating any setting.
     /// </summary>
+    /// <remarks>
+    /// Saving means serializing, and serializing means walking every list and dictionary in
+    /// <see cref="PluginSettings"/> — which makes this the largest READER of the collections that class
+    /// guards. It runs under the same lock as the writers do: a save on the draw thread (the user
+    /// ticked a checkbox) would otherwise be free to walk a list the framework thread was adding to,
+    /// and a collection walked while it is being added to throws.
+    /// </remarks>
     // `Plugin.PluginInterface` is a static property on the Plugin class (explained in Plugin.cs)
     // — Dalamud's handle for plugin-level operations, here "save my config object to disk".
-    public void Save() => Plugin.PluginInterface.SavePluginConfig(this);
+    public void Save() => Settings.RunLocked(() => Plugin.PluginInterface.SavePluginConfig(this));
 }

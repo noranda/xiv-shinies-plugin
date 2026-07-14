@@ -50,6 +50,29 @@ public class PluginSettings
     public bool CustomBackendAcknowledged { get; set; }
 
     /// <summary>
+    /// Guards every read and write of the collections below.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two threads touch them. Dalamud draws the settings window on its render thread, where a
+    /// checkbox click writes consent; the game's framework thread reads the same values on every
+    /// collection pass (<see cref="Collectors.CollectorRunner"/> copies the enabled group keys into
+    /// each pass's context). <c>List&lt;T&gt;</c> and <c>Dictionary&lt;K,V&gt;</c> tolerate neither:
+    /// an <c>Add</c> on one thread while the other is enumerating throws, and the collection pass is
+    /// lost.
+    /// </para>
+    /// <para>
+    /// <c>lock (gate) { … }</c> is C#'s mutual exclusion block — only one thread may be inside a lock
+    /// on a given object at a time, and the others wait their turn. JavaScript has no equivalent
+    /// because a single event loop makes one impossible to need. The object itself is arbitrary and
+    /// private: it exists only to be the thing threads queue on, and being private means no outside
+    /// code can lock on it and deadlock us.
+    /// </para>
+    /// </remarks>
+    // Private fields are not serialized into the config file, so this never reaches disk.
+    private readonly object gate = new();
+
+    /// <summary>
     /// Which collection categories the user opted into, keyed by the collector's category key
     /// (for example <c>"quests"</c>).
     /// </summary>
@@ -68,10 +91,14 @@ public class PluginSettings
     // `TryGetValue` is the allocation-free "look it up, tell me if it was there" pattern: it
     // returns a bool and hands the value back through the `out` parameter. The blank-key guard
     // matters because a Dictionary throws on a null key rather than simply missing.
-    public bool IsCategoryEnabled(string categoryKey) =>
-        !string.IsNullOrEmpty(categoryKey)
-        && EnabledCategories.TryGetValue(categoryKey, out var enabled)
-        && enabled;
+    public bool IsCategoryEnabled(string categoryKey)
+    {
+        if (string.IsNullOrEmpty(categoryKey))
+            return false;
+
+        lock (gate)
+            return EnabledCategories.TryGetValue(categoryKey, out var enabled) && enabled;
+    }
 
     /// <summary>Opts the given category in or out.</summary>
     /// <exception cref="ArgumentException">The key is null or empty.</exception>
@@ -81,7 +108,8 @@ public class PluginSettings
         // blank key (returns false); writing one is always a caller bug.
         ArgumentException.ThrowIfNullOrEmpty(categoryKey);
 
-        EnabledCategories[categoryKey] = enabled;
+        lock (gate)
+            EnabledCategories[categoryKey] = enabled;
     }
 
     /// <summary>
@@ -103,9 +131,52 @@ public class PluginSettings
     /// </summary>
     // `Contains` on a List is O(n), but the list stays tiny (a handful of group keys), so a plain
     // List wins on simplicity. If groups ever number in the hundreds, switch to a HashSet.
-    public bool IsItemGroupEnabled(string groupKey) =>
-        !string.IsNullOrEmpty(groupKey)
-        && EnabledItemGroupKeys.Contains(groupKey);
+    public bool IsItemGroupEnabled(string groupKey)
+    {
+        if (string.IsNullOrEmpty(groupKey))
+            return false;
+
+        lock (gate)
+            return EnabledItemGroupKeys.Contains(groupKey);
+    }
+
+    /// <summary>
+    /// Runs an action with the settings held still, for a caller that needs to read all of them at once.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Written for exactly one caller — <see cref="Configuration.Save"/>, which serializes this object
+    /// and so walks every collection in it. An `Action` is C#'s type for "a function taking nothing and
+    /// returning nothing", the closest thing to passing a callback in JavaScript. Whatever it does runs
+    /// with the lock held, so keep it to the read it was needed for.
+    /// </para>
+    /// <para>
+    /// The trade-off is deliberate: that one caller writes the config file to disk, so a settings read on
+    /// the framework thread can be made to wait on a slow write. It is a handful of milliseconds on a bad
+    /// day, against a torn read of a collection being walked while another thread adds to it — which
+    /// throws, and takes the whole collection pass down with it.
+    /// </para>
+    /// </remarks>
+    public void RunLocked(Action action)
+    {
+        lock (gate)
+            action();
+    }
+
+    /// <summary>
+    /// A point-in-time copy of the enabled group keys, for a caller that needs to read them all.
+    /// </summary>
+    /// <remarks>
+    /// A copy, not the live list. The collection pass consults these keys for every item it checks, and
+    /// the user can tick a checkbox on another thread while it does — enumerating the live list would
+    /// throw the moment those two met. Copying under the lock hands the pass a set that cannot change
+    /// underneath it, at the cost of one small allocation per pass.
+    /// </remarks>
+    public HashSet<string> SnapshotEnabledItemGroupKeys()
+    {
+        lock (gate)
+            return new HashSet<string>(EnabledItemGroupKeys);
+    }
 
     /// <summary>Opts the given item group in or out.</summary>
     /// <exception cref="ArgumentException">The key is null or empty.</exception>
@@ -115,25 +186,33 @@ public class PluginSettings
         // blank key (returns false); writing one is always a caller bug.
         ArgumentException.ThrowIfNullOrEmpty(groupKey);
 
-        if (enabled)
+        lock (gate)
         {
-            // Add to the list only if it is not already there (idempotent, no duplicates).
-            if (!EnabledItemGroupKeys.Contains(groupKey))
+            if (enabled)
             {
-                EnabledItemGroupKeys.Add(groupKey);
+                // Add to the list only if it is not already there (idempotent, no duplicates).
+                if (!EnabledItemGroupKeys.Contains(groupKey))
+                {
+                    EnabledItemGroupKeys.Add(groupKey);
+                }
             }
-        }
-        else
-        {
-            // Remove from the list if present. Remove(item) does nothing if the item is not in the list.
-            EnabledItemGroupKeys.Remove(groupKey);
+            else
+            {
+                // Remove from the list if present. Remove(item) does nothing if the item is not in the list.
+                EnabledItemGroupKeys.Remove(groupKey);
+            }
         }
     }
 
     /// <summary>True when the settings UI has already shown the given item group once.</summary>
-    public bool IsItemGroupSeen(string groupKey) =>
-        !string.IsNullOrEmpty(groupKey)
-        && SeenItemGroupKeys.Contains(groupKey);
+    public bool IsItemGroupSeen(string groupKey)
+    {
+        if (string.IsNullOrEmpty(groupKey))
+            return false;
+
+        lock (gate)
+            return SeenItemGroupKeys.Contains(groupKey);
+    }
 
     /// <summary>Mark the given item groups as seen in the settings UI.</summary>
     /// <remarks>
@@ -157,12 +236,15 @@ public class PluginSettings
             return;
         }
 
-        foreach (var groupKey in groupKeys)
+        lock (gate)
         {
-            // Add to the list only if it is not already there (idempotent, no duplicates).
-            if (!string.IsNullOrEmpty(groupKey) && !SeenItemGroupKeys.Contains(groupKey))
+            foreach (var groupKey in groupKeys)
             {
-                SeenItemGroupKeys.Add(groupKey);
+                // Add to the list only if it is not already there (idempotent, no duplicates).
+                if (!string.IsNullOrEmpty(groupKey) && !SeenItemGroupKeys.Contains(groupKey))
+                {
+                    SeenItemGroupKeys.Add(groupKey);
+                }
             }
         }
     }
@@ -185,6 +267,23 @@ public class PluginSettings
     /// </param>
     /// <returns>When true, the caller should persist the updated config.</returns>
     public bool MigrateItemGroupConsent(
+        IReadOnlyList<ItemManifestGroup> groups, bool itemsCategoryEnabled)
+    {
+        // Held for the whole method, so the run-once flag and every write it makes land as one: a
+        // checkbox click on the UI thread cannot slip between them and be lost. (What the caller passed
+        // for itemsCategoryEnabled was read before this lock was taken, so a click can still change that
+        // answer underneath us — harmlessly, since a category the user has just switched off uploads
+        // nothing whatever its groups say, and switching it back on ticks them again.)
+        //
+        // Taking a lock this thread may already hold is fine in C# — locks are re-entrant, so the
+        // SetItemGroupEnabled and MarkItemGroupsSeen calls below simply pass through.
+        lock (gate)
+        {
+            return MigrateItemGroupConsentCore(groups, itemsCategoryEnabled);
+        }
+    }
+
+    private bool MigrateItemGroupConsentCore(
         IReadOnlyList<ItemManifestGroup> groups, bool itemsCategoryEnabled)
     {
         // Run only once.
@@ -225,6 +324,54 @@ public class PluginSettings
         MarkItemGroupsSeen(legacyGroupKeys);
 
         return true;
+    }
+
+    /// <summary>
+    /// Records that there is no pre-group consent to carry over, because the user chose their
+    /// groups by hand — in the first-run wizard, from group checkboxes it put on screen.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="MigrateItemGroupConsent"/> speaks for a user who never saw a group checkbox: it
+    /// reads their category-level items consent and grants the <c>legacy</c> group the scope that
+    /// consent already covered. A user who <i>was</i> shown the groups has said something more
+    /// specific than that, and it can disagree — leaving the legacy group unticked while opting the
+    /// category itself in is a coherent, deliberate choice. Letting the migration run for them would
+    /// silently re-enable exactly the group they turned down. Settling the shared
+    /// <see cref="ItemGroupConsentMigrated"/> flag is what makes that impossible: the migration is
+    /// run-once, so an install that starts life settled never migrates at all.
+    /// </para>
+    /// <para>
+    /// Grants no consent of its own — the only thing it writes is the flag. What the user ticked in
+    /// the wizard was already written as they ticked it.
+    /// </para>
+    /// </remarks>
+    /// <param name="groupsWereShown">
+    /// Whether the wizard actually RENDERED group checkboxes for this user — answered from what it
+    /// drew, never from what the server sent. A user who was shown none made no group-level choice, so
+    /// there is nothing to settle and the flag must stay unset, leaving the ordinary migration free to
+    /// speak for them.
+    /// </param>
+    /// <returns>When true, the caller should persist the updated config.</returns>
+    public bool SettleItemGroupConsent(bool groupsWereShown)
+    {
+        if (!groupsWereShown)
+        {
+            return false;
+        }
+
+        lock (gate)
+        {
+            // Already settled, or already migrated (they are the same flag). Nothing to write, so the
+            // caller is told not to spend a config save on it.
+            if (ItemGroupConsentMigrated)
+            {
+                return false;
+            }
+
+            ItemGroupConsentMigrated = true;
+            return true;
+        }
     }
 
     /// <summary>

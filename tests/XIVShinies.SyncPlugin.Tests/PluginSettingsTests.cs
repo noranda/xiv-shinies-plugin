@@ -11,6 +11,39 @@ namespace XIVShinies.SyncPlugin.Tests;
 // and therefore cannot be instantiated outside the game — that part is covered by in-game QA.
 public class PluginSettingsTests
 {
+    // The collection pass reads the enabled groups on the framework thread while the user can be ticking
+    // a checkbox on the draw thread, and a list cannot be walked and added to at once — so what the pass
+    // gets is a COPY, taken while the settings are held still. Handing back the live list instead would
+    // leave the two threads sharing one collection, and the pass would throw the moment they met.
+    [Fact]
+    public void The_enabled_group_snapshot_does_not_change_underneath_its_reader()
+    {
+        var settings = new PluginSettings();
+        settings.SetItemGroupEnabled("proofs", true);
+
+        var snapshot = settings.SnapshotEnabledItemGroupKeys();
+
+        settings.SetItemGroupEnabled("materials", true);
+        settings.SetItemGroupEnabled("proofs", false);
+
+        Assert.Single(snapshot);
+        Assert.Contains("proofs", snapshot);
+        Assert.DoesNotContain("materials", snapshot);
+    }
+
+    // The hook the config save uses to serialize these collections without another thread writing to them
+    // mid-walk. Nothing to observe from outside but that the work runs, which is what this pins.
+    [Fact]
+    public void Running_locked_runs_the_work()
+    {
+        var settings = new PluginSettings();
+        var ran = false;
+
+        settings.RunLocked(() => ran = true);
+
+        Assert.True(ran);
+    }
+
     [Fact]
     public void Defaults_send_nothing_until_the_user_opts_in()
     {
@@ -286,5 +319,104 @@ public class PluginSettingsTests
         Assert.True(settings.ItemGroupConsentMigrated);
         Assert.Empty(settings.EnabledItemGroupKeys);
         Assert.Empty(settings.SeenItemGroupKeys);
+    }
+
+    [Fact]
+    public void Settling_group_consent_marks_the_migration_done_when_the_wizard_showed_groups()
+    {
+        var settings = new PluginSettings();
+
+        var changed = settings.SettleItemGroupConsent(groupsWereShown: true);
+
+        Assert.True(changed);
+        Assert.True(settings.ItemGroupConsentMigrated);
+
+        // Settling records that there is nothing to carry over — it never grants consent of its
+        // own. The user's choices are exactly what they ticked in the wizard.
+        Assert.Empty(settings.EnabledItemGroupKeys);
+    }
+
+    [Fact]
+    public void Settling_group_consent_does_nothing_when_the_wizard_showed_no_groups()
+    {
+        var settings = new PluginSettings();
+
+        // The wizard never drew a group checkbox: the config it waited for carried no groups, whether
+        // because the server sent none or because the poll failed outright. Either way the user made no
+        // group-level choice, so the migration is still the only thing that can speak for them — and
+        // burning the run-once flag here would silence it forever.
+        Assert.False(settings.SettleItemGroupConsent(groupsWereShown: false));
+        Assert.False(settings.ItemGroupConsentMigrated);
+    }
+
+    [Fact]
+    public void A_settled_install_never_migrates_afterwards()
+    {
+        var settings = new PluginSettings();
+
+        // The user saw the groups in the wizard and deliberately left the legacy one off, while
+        // opting the items category itself in.
+        var shown = new[]
+        {
+            new ItemManifestGroup { Key = "old", Label = "x", Ids = Array.Empty<uint>(), Legacy = true },
+        };
+        settings.SetCategoryEnabled("items", true);
+        settings.SettleItemGroupConsent(groupsWereShown: true);
+
+        // The first /config poll after onboarding must NOT resurrect the group they turned down:
+        // the migration exists to carry a PRE-GROUP user's category consent onto the legacy group,
+        // and this user's choice was explicit.
+        var migrated = settings.MigrateItemGroupConsent(shown, itemsCategoryEnabled: true);
+
+        Assert.False(migrated);
+        Assert.False(settings.IsItemGroupEnabled("old"));
+    }
+
+    // The other half of that rule, and the one that keeps a user who was shown no group checkboxes from
+    // being stranded: nothing was settled, so the first poll to arrive carrying groups migrates their
+    // category-level items consent onto the legacy group.
+    [Fact]
+    public void An_unsettled_install_still_migrates_afterwards()
+    {
+        var settings = new PluginSettings();
+        var groups = new[]
+        {
+            new ItemManifestGroup { Key = "old", Label = "x", Ids = Array.Empty<uint>(), Legacy = true },
+        };
+
+        settings.SetCategoryEnabled("items", true);
+        settings.SettleItemGroupConsent(groupsWereShown: false);
+
+        var migrated = settings.MigrateItemGroupConsent(groups, itemsCategoryEnabled: true);
+
+        Assert.True(migrated);
+        Assert.True(settings.IsItemGroupEnabled("old"));
+    }
+
+    [Fact]
+    public void Settling_group_consent_twice_reports_no_second_change()
+    {
+        var settings = new PluginSettings();
+
+        Assert.True(settings.SettleItemGroupConsent(groupsWereShown: true));
+
+        // Already settled — the second call has nothing to write, so the caller is told not to save.
+        Assert.False(settings.SettleItemGroupConsent(groupsWereShown: true));
+        Assert.True(settings.ItemGroupConsentMigrated);
+    }
+
+    [Fact]
+    public void A_migrated_install_is_already_settled()
+    {
+        var settings = new PluginSettings();
+        var groups = new[]
+        {
+            new ItemManifestGroup { Key = "old", Label = "x", Ids = Array.Empty<uint>(), Legacy = true },
+        };
+
+        settings.MigrateItemGroupConsent(groups, itemsCategoryEnabled: true);
+
+        // The two share one flag, so a migration that has already run leaves nothing to settle.
+        Assert.False(settings.SettleItemGroupConsent(groupsWereShown: true));
     }
 }

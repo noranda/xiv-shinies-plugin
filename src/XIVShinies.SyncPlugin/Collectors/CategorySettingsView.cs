@@ -25,6 +25,20 @@ public sealed record CategorySettingsRow
     public required bool UserEnabled { get; init; }
 
     /// <summary>
+    /// Whether this row's collector announced itself as manifest-driven (see
+    /// <see cref="ICollector.UsesItemManifest"/>).
+    /// </summary>
+    /// <remarks>
+    /// Carried on the row so a pure view can act on it without holding a collector, and it is what keeps
+    /// <see cref="ReadStatusView"/> free of a category-name branch: the container lines belong to a
+    /// manifest-driven collection, so the panel needs to know which row that is — to stand its container
+    /// lines in for the collection's own line, and to drop them when no such collection is switched on.
+    /// The per-group checkboxes are governed by the same flag one step earlier: <see cref="Groups"/> is
+    /// only ever populated for a collector that announced it.
+    /// </remarks>
+    public required bool UsesItemManifest { get; init; }
+
+    /// <summary>
     /// False when the server has switched this category off for everyone. The checkbox stays
     /// visible but disabled: the user's own preference is remembered and reapplied if the server
     /// turns it back on.
@@ -43,17 +57,6 @@ public sealed record CategorySettingsRow
 
     /// <summary>True when this category will actually be uploaded as things stand.</summary>
     public bool IsEffectivelyOn => UserEnabled && ServerEnabled;
-
-    /// <summary>
-    /// True when this row's collector reads the item manifest (see <see cref="ICollector.UsesItemManifest"/>).
-    /// </summary>
-    /// <remarks>
-    /// The window uses this to decide whether to draw per-source scan notes (inventory live, saddlebag
-    /// cached, and so on) beneath the row. It is a superset of "has groups": a manifest-driven collector
-    /// still wants its source notes shown before the server has sent any consent groups, so the window
-    /// cannot infer this from <see cref="Groups"/> being non-null — the collector has to say it directly.
-    /// </remarks>
-    public required bool UsesItemManifest { get; init; }
 
     /// <summary>
     /// One row per item-manifest consent group, for a manifest-driven collector — or null when this
@@ -140,6 +143,10 @@ public static class CategorySettingsView
                 WhatGetsSent = collector.WhatGetsSent,
                 UserEnabled = settings.IsCategoryEnabled(key),
 
+                // Carried through verbatim from the collector's own self-description. Nothing here
+                // decides which collections are manifest-driven; the collector says so itself.
+                UsesItemManifest = collector.UsesItemManifest,
+
                 // A config we have not fetched forbids nothing, matching how the collectors and the
                 // upload gate treat it. Otherwise a plugin that cannot reach /config would show every
                 // category as disabled by the server, which would be a lie.
@@ -150,10 +157,6 @@ public static class CategorySettingsView
                 SkipReason = lastSkipped is not null && lastSkipped.TryGetValue(key, out var reason)
                     ? reason
                     : null,
-
-                // Carried straight from the collector's self-description, so the window can show
-                // per-source scan notes for a manifest-driven category even before any groups exist.
-                UsesItemManifest = collector.UsesItemManifest,
 
                 Groups = BuildGroupRows(collector, settings, remoteConfig),
             });
