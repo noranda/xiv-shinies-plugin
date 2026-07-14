@@ -923,6 +923,7 @@ internal sealed class SyncManager : IDisposable
                     RetryAfter = response.RetryAfter,
                     HttpStatusCode = response.HttpStatusCode,
                     Detail = UploadLogText.IssuesText(response.Error),
+                    ProvenSteps = response.Value?.ProvenSteps,
                 };
 
                 if (HandleResponse(response, trigger, startedFor))

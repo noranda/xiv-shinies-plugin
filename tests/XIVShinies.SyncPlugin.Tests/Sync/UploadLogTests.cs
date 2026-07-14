@@ -238,7 +238,8 @@ public class UploadLogTests
         Assert.Equal(first.Categories[0].Fingerprint, second.Categories[0].Fingerprint);
     }
 
-    // The trade-in case: count unchanged, contents swapped — must still flag as changed.
+    // A content swap that keeps the count identical must still flag: the diff compares the
+    // fingerprint as well as the count, so contents can never change invisibly.
     [Fact]
     public void A_same_count_content_swap_is_flagged_as_changed()
     {
@@ -246,15 +247,65 @@ public class UploadLogTests
         {
             SomeEntry() with
             {
-                Categories = new[] { new UploadLogCategory("items", 52, "aaaa1111") },
+                Categories = new[] { new UploadLogCategory("quests", 52, "aaaa1111") },
             },
             SomeEntry() with
             {
-                Categories = new[] { new UploadLogCategory("items", 52, "bbbb2222") },
+                Categories = new[] { new UploadLogCategory("quests", 52, "bbbb2222") },
             },
         };
 
-        Assert.Contains("items", UploadLogDiff.ChangedCategories(newestFirst, 0));
+        Assert.Contains("quests", UploadLogDiff.ChangedCategories(newestFirst, 0));
+    }
+
+    // A manifest-driven category's contents move whenever the SERVER edits its manifest, so
+    // "changed" would claim the player obtained something when nothing happened. Those
+    // categories are excluded from the diff entirely; their honest signal is the server's
+    // proof answer (see the proof-reporting section below).
+    [Fact]
+    public void A_manifest_driven_category_is_never_flagged_as_changed()
+    {
+        var newestFirst = new[]
+        {
+            SomeEntry() with
+            {
+                Categories = new[]
+                {
+                    new UploadLogCategory("items", 60, "bbbb2222", UsesItemManifest: true),
+                },
+            },
+            SomeEntry() with
+            {
+                Categories = new[]
+                {
+                    new UploadLogCategory("items", 52, "aaaa1111", UsesItemManifest: true),
+                },
+            },
+        };
+
+        Assert.Empty(UploadLogDiff.ChangedCategories(newestFirst, 0));
+    }
+
+    [Fact]
+    public void Draft_marks_the_categories_the_snapshot_calls_manifest_driven()
+    {
+        var snapshot = new CollectionSnapshot
+        {
+            Collections = new Dictionary<string, JsonNode>
+            {
+                ["quests"] = JsonNode.Parse("[1,2,3]")!,
+                ["items"] = JsonNode.Parse("""[{"id":10,"count":2}]""")!,
+            },
+            Skipped = new Dictionary<string, string>(),
+            ManifestDrivenKeys = new HashSet<string> { "items" },
+        };
+
+        var draft = UploadLogEntry.Draft(DateTimeOffset.UnixEpoch, SyncTrigger.Manual, snapshot);
+
+        Assert.Collection(
+            draft.Categories,
+            c => Assert.False(c.UsesItemManifest),
+            c => Assert.True(c.UsesItemManifest));
     }
 
     private static UploadLogEntry EntryWith(params (string Key, int Count)[] categories)
@@ -320,6 +371,79 @@ public class UploadLogTests
         };
 
         Assert.Empty(UploadLogDiff.ChangedCategories(newestFirst, 1));
+    }
+
+    // --- Proof reporting for manifest-driven categories -------------------------------------
+    // The server answers an items-carrying upload with provenSteps: the relic-step rows this
+    // upload created or promoted. That delta — not a content diff — is what tells the user
+    // whether they actually progressed, so the window prints it beside the category.
+
+    private static UploadLogEntry ManifestEntry(
+        int? provenSteps, ApiStatus status = ApiStatus.Ok) => SomeEntry() with
+    {
+        Status = status,
+        Categories = new[]
+        {
+            new UploadLogCategory("items", 189, "aaaa1111", UsesItemManifest: true),
+        },
+        ProvenSteps = provenSteps,
+    };
+
+    [Theory]
+    [InlineData(3, "3 new steps proven")]
+    [InlineData(1, "1 new step proven")]
+    public void Proof_text_reports_the_steps_an_accepted_upload_proved(int steps, string expected)
+    {
+        Assert.Equal(expected, UploadLogText.ProofText(ManifestEntry(steps)));
+    }
+
+    // Zero means "items applied, nothing new proved" — an honest quiet, not a note.
+    [Fact]
+    public void Proof_text_is_silent_when_nothing_new_was_proved()
+    {
+        Assert.Null(UploadLogText.ProofText(ManifestEntry(0)));
+    }
+
+    // No provenSteps key on an accepted items-carrying upload means derivation failed
+    // server-side; the next upload retries it, so the honest word is "pending".
+    [Fact]
+    public void Proof_text_says_pending_when_the_server_sent_no_proof_answer()
+    {
+        Assert.Equal("proof pending", UploadLogText.ProofText(ManifestEntry(null)));
+    }
+
+    // A refused or failed upload has no server verdict to report — even when a step value is
+    // somehow present, the status gate wins.
+    [Theory]
+    [InlineData(null)]
+    [InlineData(3)]
+    public void Proof_text_is_null_when_the_upload_was_not_accepted(int? steps)
+    {
+        Assert.Null(UploadLogText.ProofText(ManifestEntry(steps, ApiStatus.NetworkError)));
+    }
+
+    // An upload that carried no manifest-driven category was never owed a proof answer.
+    [Fact]
+    public void Proof_text_is_null_when_no_manifest_driven_category_was_sent()
+    {
+        Assert.Null(UploadLogText.ProofText(SomeEntry()));
+    }
+
+    // An EMPTY manifest-driven category carries no information (the contract reads an empty
+    // array as "nothing to apply"), so the server owes it no proof answer — a missing one is
+    // not a pending proof, and saying so would falsely report a server-side failure.
+    [Fact]
+    public void Proof_text_is_null_when_the_manifest_category_carried_no_facts()
+    {
+        var entry = ManifestEntry(null) with
+        {
+            Categories = new[]
+            {
+                new UploadLogCategory("items", 0, "aaaa1111", UsesItemManifest: true),
+            },
+        };
+
+        Assert.Null(UploadLogText.ProofText(entry));
     }
 
     // --- Failure diagnostics ----------------------------------------------------------------
@@ -495,11 +619,11 @@ public class UploadLogTests
         {
             SomeEntry() with
             {
-                Categories = new[] { new UploadLogCategory("items", 52, "bbbb2222") },
+                Categories = new[] { new UploadLogCategory("quests", 52, "bbbb2222") },
             },
             SomeEntry() with
             {
-                Categories = new[] { new UploadLogCategory("items", 52, "aaaa1111") },
+                Categories = new[] { new UploadLogCategory("quests", 52, "aaaa1111") },
             },
         };
 
@@ -507,8 +631,126 @@ public class UploadLogTests
         var lines = text.Split('\n');
 
         // Newest line (right after the header) is marked; the baseline line is not.
-        Assert.Contains("| changed: items", lines[1]);
+        Assert.Contains("| changed: quests", lines[1]);
         Assert.DoesNotContain("changed:", lines[2]);
+    }
+
+    // The dump reports the proof answer in wire terms, whatever its value — including zero,
+    // which the window stays silent about but a debugger wants to see.
+    [Theory]
+    [InlineData(3)]
+    [InlineData(0)]
+    public void Clipboard_text_reports_proven_steps_in_wire_terms(int steps)
+    {
+        var text = UploadLogText.ClipboardText(
+            "1.2.3", "https://xiv-shinies.com", new[] { ManifestEntry(steps) });
+
+        Assert.Contains($"| provenSteps: {steps}", text);
+    }
+
+    // An accepted items-carrying upload with NO proof answer is the derivation-failed case —
+    // exactly the line a bug report needs to show, so the dump says so explicitly.
+    [Fact]
+    public void Clipboard_text_marks_an_absent_proof_answer()
+    {
+        var text = UploadLogText.ClipboardText(
+            "1.2.3", "https://xiv-shinies.com", new[] { ManifestEntry(null) });
+
+        Assert.Contains("| provenSteps: absent", text);
+    }
+
+    // No answer arrived and none was owed (nothing manifest-driven was sent) — the segment
+    // would be noise on every id-list-only upload.
+    [Fact]
+    public void Clipboard_text_omits_proven_steps_when_none_arrived_and_none_was_owed()
+    {
+        var text = UploadLogText.ClipboardText(
+            "1.2.3", "https://xiv-shinies.com", new[] { SomeEntry() });
+
+        Assert.DoesNotContain("provenSteps", text);
+    }
+
+    // The empty-category rule, in the dump: an all-empty manifest-driven category was never
+    // owed an answer, so a missing one gets no "absent" marker.
+    [Fact]
+    public void Clipboard_text_omits_the_absent_marker_when_the_manifest_category_was_empty()
+    {
+        var entry = ManifestEntry(null) with
+        {
+            Categories = new[]
+            {
+                new UploadLogCategory("items", 0, "aaaa1111", UsesItemManifest: true),
+            },
+        };
+
+        var text = UploadLogText.ClipboardText("1.2.3", "https://xiv-shinies.com", new[] { entry });
+
+        Assert.DoesNotContain("provenSteps", text);
+    }
+
+    // The dump is verbatim wire truth: if an answer is present it prints, even on an entry
+    // that carried nothing manifest-driven — a contract-impossible reply is exactly what a
+    // debugger would want to see.
+    [Fact]
+    public void Clipboard_text_reports_a_proof_answer_even_without_a_manifest_driven_category()
+    {
+        var entry = SomeEntry() with { ProvenSteps = 2 };
+
+        var text = UploadLogText.ClipboardText("1.2.3", "https://xiv-shinies.com", new[] { entry });
+
+        Assert.Contains("| provenSteps: 2", text);
+    }
+
+    // The two signals are independent segments: an id-list category's "changed" mark and the
+    // upload's proof answer both appear when one upload carries both facts.
+    [Fact]
+    public void Clipboard_text_reports_changed_and_proven_steps_together()
+    {
+        var older = SomeEntry() with
+        {
+            Categories = new[]
+            {
+                new UploadLogCategory("quests", 52, "aaaa1111"),
+                new UploadLogCategory("items", 189, "cccc3333", UsesItemManifest: true),
+            },
+        };
+        var newest = older with
+        {
+            Categories = new[]
+            {
+                new UploadLogCategory("quests", 53, "bbbb2222"),
+                new UploadLogCategory("items", 189, "cccc3333", UsesItemManifest: true),
+            },
+            ProvenSteps = 2,
+        };
+
+        var text = UploadLogText.ClipboardText(
+            "1.2.3", "https://xiv-shinies.com", new[] { newest, older });
+        var lines = text.Split('\n');
+
+        // Both segments land on the newest line: quests changed against its baseline, and the
+        // upload's proof answer printed verbatim.
+        Assert.Contains("| changed: quests", lines[1]);
+        Assert.Contains("| provenSteps: 2", lines[1]);
+    }
+
+    // The window rule and the dump rule agree: a manifest-driven category never reads as
+    // "changed", in gold or in text.
+    [Fact]
+    public void Clipboard_text_never_marks_a_manifest_driven_category_as_changed()
+    {
+        var older = ManifestEntry(0) with
+        {
+            Categories = new[]
+            {
+                new UploadLogCategory("items", 52, "bbbb2222", UsesItemManifest: true),
+            },
+        };
+        var newestFirst = new[] { ManifestEntry(3), older };
+
+        var text = UploadLogText.ClipboardText("1.2.3", "https://xiv-shinies.com", newestFirst);
+
+        Assert.DoesNotContain("changed:", text);
     }
 
     [Fact]

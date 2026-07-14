@@ -57,6 +57,21 @@ public sealed record CollectionSnapshot
     // dictionary is the honest default for "nothing was reported".
     public IReadOnlyDictionary<string, ItemSourceStatus> SourceNotes { get; init; } =
         new Dictionary<string, ItemSourceStatus>();
+
+    /// <summary>
+    /// The categories whose collectors declare <see cref="ICollector.UsesItemManifest"/> — their
+    /// scope is the server's item manifest rather than fixed at compile time.
+    /// </summary>
+    /// <remarks>
+    /// The upload log copies this onto each category it summarizes, where it decides the
+    /// category's change signal — <see cref="Sync.UploadLogCategory"/> holds the full reasoning.
+    /// Carried as collector self-description (the same idea as
+    /// <see cref="ICollector.DisplayName"/>) so no consumer ever compares keys against a
+    /// hardcoded name.
+    /// </remarks>
+    // Not `required`, like the fields above: an empty set is the honest default for a test
+    // snapshot that has no manifest-driven categories.
+    public IReadOnlySet<string> ManifestDrivenKeys { get; init; } = new HashSet<string>();
 }
 
 /// <summary>
@@ -83,6 +98,7 @@ public static class CollectorRunner
         var skipped = new Dictionary<string, string>();
         var durations = new Dictionary<string, TimeSpan>();
         var sourceNotes = new Dictionary<string, ItemSourceStatus>();
+        var manifestDrivenKeys = new HashSet<string>();
 
         // Built once and shared: every collector sees the same view of the world for this pass.
         // EnabledItemGroupKeys carries the user's per-group opt-ins so the item collector scans only
@@ -98,6 +114,11 @@ public static class CollectorRunner
         foreach (var collector in collectors)
         {
             var key = collector.CategoryKey;
+
+            // Self-description, recorded before any gating: whether a category is manifest-driven
+            // is a fact about its collector, not about whether this pass collected it.
+            if (collector.UsesItemManifest)
+                manifestDrivenKeys.Add(key);
 
             // Ask before reading: a disabled category must cost nothing, not even a game lookup.
             if (!CollectorGate.IsEnabled(key, settings, remoteConfig))
@@ -165,6 +186,7 @@ public static class CollectorRunner
             Skipped = skipped,
             Durations = durations,
             SourceNotes = sourceNotes,
+            ManifestDrivenKeys = manifestDrivenKeys,
         };
     }
 }

@@ -36,9 +36,9 @@ public class CollectorRunnerTests
 
         public string WhatGetsSent => $"Facts about {CategoryKey}.";
 
-        // The runner never reads this flag either — it only matters to the settings window's group
-        // rows — so the fake reports the fixed-scope default.
-        public bool UsesItemManifest => false;
+        // The runner copies this self-description into the snapshot (the upload log uses it to
+        // pick a category's change signal); fixed-scope is the default, tests opt in per fake.
+        public bool UsesItemManifest { get; init; }
 
         public int CollectCallCount { get; private set; }
 
@@ -83,6 +83,31 @@ public class CollectorRunnerTests
         Assert.True(snapshot.Collections.ContainsKey(UnknownCategory));
         Assert.Equal(42u, snapshot.Collections[UnknownCategory].AsArray()[0]!.GetValue<uint>());
         Assert.Empty(snapshot.Skipped);
+    }
+
+    // The snapshot records which categories are manifest-driven so the upload log can pick each
+    // category's change signal without ever comparing keys against a hardcoded name.
+    [Fact]
+    public void A_manifest_driven_collectors_key_is_marked_in_the_snapshot()
+    {
+        var collector = new FakeCollector(UnknownCategory, () => CollectResult.Ids(new[] { 42u }))
+        {
+            UsesItemManifest = true,
+        };
+
+        var snapshot = CollectorRunner.Run(
+            new[] { collector }, OptedIn(UnknownCategory), RemoteConfig());
+
+        Assert.Contains(UnknownCategory, snapshot.ManifestDrivenKeys);
+    }
+
+    [Fact]
+    public void A_fixed_scope_collectors_key_is_not_marked_manifest_driven()
+    {
+        var snapshot = CollectorRunner.Run(
+            new[] { Collecting(UnknownCategory, 42) }, OptedIn(UnknownCategory), RemoteConfig());
+
+        Assert.DoesNotContain(UnknownCategory, snapshot.ManifestDrivenKeys);
     }
 
     [Fact]
