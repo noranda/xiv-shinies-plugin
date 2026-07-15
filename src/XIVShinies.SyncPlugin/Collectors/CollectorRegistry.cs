@@ -58,10 +58,17 @@ public static class CollectorRegistry
         // — or that "none of this item" is itself sent — would be technically true and practically
         // misleading. Also names the per-group choice now that item consent is granted per manifest
         // group rather than as one all-or-nothing switch.
+        //
+        // Currency balances get their own sentence, with gil named outright: a balance is wealth
+        // data, and "items" alone would not tell a reader that consenting to a currency group sends
+        // how much gil they hold. Phrased conditionally ("when XIV Shinies asks") because whether
+        // any currency is asked about is the server's manifest choice, group-gated like everything
+        // else — the sentence is true both before and after such a group exists.
         WhatGetsSent =
             "Counts of the specific items XIV Shinies asks about — including that you have none of " +
             "an item — checked across your inventory, Armoire, Glamour Dresser, Saddlebag, and " +
-            "retainers. You choose which groups of items to share when XIV Shinies offers them. " +
+            "retainers. When XIV Shinies asks about currencies, your balances (gil included) are " +
+            "sent the same way. You choose which groups to share when XIV Shinies offers them. " +
             "Nothing else is sent.",
 
         // The only collection whose scope comes from the server's item manifest rather than being
