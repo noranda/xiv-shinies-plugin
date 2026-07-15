@@ -165,6 +165,17 @@ internal sealed class SyncManager : IDisposable
     private volatile bool hasCollected;
 
     /// <summary>
+    /// The manifest version the truncation warning was last logged for, or null when none has
+    /// been. Keeps the warning at one line per oversized manifest instead of one per sweep —
+    /// the condition only changes when the server serves a different manifest.
+    /// </summary>
+    /// <remarks>
+    /// Framework thread only (written and read inside the collection pass), so it follows the
+    /// same single-writer discipline as the identity fields: one writer, one thread, no locks.
+    /// </remarks>
+    private string? truncationWarnedForManifest;
+
+    /// <summary>
     /// Set when the server reported a failure only the user can fix. Suppresses all further work
     /// until the user intervenes, rather than looping against a server that will keep refusing.
     /// </summary>
@@ -748,6 +759,22 @@ internal sealed class SyncManager : IDisposable
             // true whether or not the resulting payload ever reaches the server (it may be empty,
             // rejected, or halted).
             hasCollected = true;
+
+            // The manifest cap clips silently at the point of use (a bounded scan must not depend
+            // on anyone noticing), so this is where the clip becomes visible: without it, a server
+            // bug serving an oversized manifest would read as mysteriously missing counts. Warned
+            // once per manifest version — the sweep cadence would otherwise repeat it every pass.
+            // The wording states the manifest fact rather than describing this pass's scan: the
+            // flag is config-derived, so it can be true on a pass that ran no item scan at all
+            // (an unlock pass for another category, or the items category switched off).
+            if (snapshot.ManifestTruncated && truncationWarnedForManifest != config?.ManifestVersion)
+            {
+                truncationWarnedForManifest = config?.ManifestVersion;
+                log.Warning(
+                    $"The server's item manifest exceeds the {CollectContext.MaxManifestItems}-id " +
+                    $"ceiling; ids past the first {CollectContext.MaxManifestItems} will not be " +
+                    "scanned or reported.");
+            }
 
             // Bound every category to the contract's caps before anything downstream sees it.
             // An over-cap payload is rejected whole by the server (400), losing every category

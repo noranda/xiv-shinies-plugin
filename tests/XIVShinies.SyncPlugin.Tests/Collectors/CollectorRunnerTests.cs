@@ -110,6 +110,33 @@ public class CollectorRunnerTests
         Assert.DoesNotContain(UnknownCategory, snapshot.ManifestDrivenKeys);
     }
 
+    // The context's truncation verdict must reach the snapshot, because the orchestrator (which
+    // holds the logger) sees only the snapshot — the runner reports the fact, the caller decides
+    // what to do with it, the same handoff the snapshot uses for durations.
+    [Fact]
+    public void The_snapshot_carries_the_manifest_truncation_verdict()
+    {
+        var oversized = new uint[CollectContext.MaxManifestItems + 1];
+        for (var i = 0; i < oversized.Length; i++)
+            oversized[i] = (uint)(i + 1);
+
+        var config = RemoteConfig() with { ItemManifest = oversized };
+
+        var snapshot = CollectorRunner.Run(
+            new[] { Collecting(UnknownCategory, 42) }, OptedIn(UnknownCategory), config);
+
+        Assert.True(snapshot.ManifestTruncated);
+    }
+
+    [Fact]
+    public void The_snapshot_reports_no_truncation_for_a_sane_manifest()
+    {
+        var snapshot = CollectorRunner.Run(
+            new[] { Collecting(UnknownCategory, 42) }, OptedIn(UnknownCategory), RemoteConfig());
+
+        Assert.False(snapshot.ManifestTruncated);
+    }
+
     [Fact]
     public void A_category_the_user_never_opted_into_is_omitted()
     {

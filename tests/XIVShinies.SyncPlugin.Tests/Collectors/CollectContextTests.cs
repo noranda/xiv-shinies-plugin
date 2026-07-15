@@ -179,6 +179,122 @@ public class CollectContextTests
         Assert.Equal(oversized[CollectContext.MaxManifestItems - 1], bounded[^1]);
     }
 
+    // --- Truncation flag ---------------------------------------------------------------------
+    // The cap truncates silently at the point of use; this flag is how the orchestrator learns a
+    // clip happened so it can say so in the log. "Some ids are not being scanned" must be
+    // observable — a server bug serving an oversized manifest would otherwise read as
+    // mysteriously missing counts.
+
+    [Fact]
+    public void The_truncation_flag_is_off_without_a_config()
+    {
+        var context = new CollectContext { RemoteConfig = null };
+
+        Assert.False(context.ManifestTruncated);
+    }
+
+    [Fact]
+    public void The_truncation_flag_is_off_for_a_sane_flat_manifest()
+    {
+        var context = new CollectContext { RemoteConfig = ConfigWith(new uint[] { 1, 2, 3 }) };
+
+        Assert.False(context.ManifestTruncated);
+    }
+
+    [Fact]
+    public void The_truncation_flag_is_on_for_an_oversized_flat_manifest()
+    {
+        var oversized = Enumerable.Range(1, CollectContext.MaxManifestItems + 1)
+            .Select(id => (uint)id)
+            .ToArray();
+        var context = new CollectContext { RemoteConfig = ConfigWith(oversized) };
+
+        Assert.True(context.ManifestTruncated);
+    }
+
+    // A manifest of exactly the cap fits whole — nothing was clipped, so nothing to warn about.
+    [Fact]
+    public void The_truncation_flag_is_off_at_exactly_the_cap()
+    {
+        var exact = Enumerable.Range(1, CollectContext.MaxManifestItems)
+            .Select(id => (uint)id)
+            .ToArray();
+        var context = new CollectContext { RemoteConfig = ConfigWith(exact) };
+
+        Assert.False(context.ManifestTruncated);
+    }
+
+    [Fact]
+    public void The_truncation_flag_is_on_for_an_oversized_enabled_group_union()
+    {
+        var oversized = Enumerable.Range(1, CollectContext.MaxManifestItems + 1)
+            .Select(id => (uint)id)
+            .ToArray();
+        var context = new CollectContext
+        {
+            RemoteConfig = ConfigWithGroups(("relic-proofs", oversized, true)),
+            EnabledItemGroupKeys = new HashSet<string> { "relic-proofs" },
+        };
+
+        Assert.True(context.ManifestTruncated);
+    }
+
+    // The union dedupes before it truncates, so the flag must count the way the union does: two
+    // groups sharing most of their ids can sum past the cap while the deduped union fits whole.
+    [Fact]
+    public void The_truncation_flag_counts_deduped_ids_not_the_raw_group_sum()
+    {
+        var shared = Enumerable.Range(1, CollectContext.MaxManifestItems - 1)
+            .Select(id => (uint)id)
+            .ToArray();
+        var context = new CollectContext
+        {
+            // Raw sum is ~2x the cap; the deduped union is cap - 1 ids plus one extra.
+            RemoteConfig = ConfigWithGroups(
+                ("a", shared, true),
+                ("b", shared.Append(900_000u).ToArray(), false)),
+            EnabledItemGroupKeys = new HashSet<string> { "a", "b" },
+        };
+
+        Assert.False(context.ManifestTruncated);
+    }
+
+    // Same fallback the manifest itself takes: an empty groups array means "no groups", so an
+    // oversized FLAT manifest must still raise the flag — routing it into the (empty) group loop
+    // would return false and mask a real clip.
+    [Fact]
+    public void The_truncation_flag_falls_back_to_the_flat_manifest_for_an_empty_group_list()
+    {
+        var oversized = Enumerable.Range(1, CollectContext.MaxManifestItems + 1)
+            .Select(id => (uint)id)
+            .ToArray();
+        var config = ConfigWith(oversized) with
+        {
+            ItemManifestGroups = Array.Empty<ItemManifestGroup>(),
+        };
+
+        var context = new CollectContext { RemoteConfig = config };
+
+        Assert.True(context.ManifestTruncated);
+    }
+
+    [Fact]
+    public void The_truncation_flag_ignores_disabled_groups()
+    {
+        var oversized = Enumerable.Range(1, CollectContext.MaxManifestItems + 1)
+            .Select(id => (uint)id)
+            .ToArray();
+        var context = new CollectContext
+        {
+            RemoteConfig = ConfigWithGroups(
+                ("small", new uint[] { 1 }, true),
+                ("huge", oversized, false)),
+            EnabledItemGroupKeys = new HashSet<string> { "small" },
+        };
+
+        Assert.False(context.ManifestTruncated);
+    }
+
     [Fact]
     public void The_enabled_group_list_is_empty_without_a_config()
     {

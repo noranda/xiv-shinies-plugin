@@ -94,6 +94,46 @@ public sealed record CollectContext
     }
 
     /// <summary>
+    /// True when <see cref="ItemManifest"/> was clipped at <see cref="MaxManifestItems"/> —
+    /// the server asked about more ids than the plugin is willing to scan, and the tail is not
+    /// being reported.
+    /// </summary>
+    /// <remarks>
+    /// The clipping itself is silent at the point of use (a bounded scan must not depend on
+    /// anyone noticing); this flag is how the orchestrator learns it happened so it can say so
+    /// in the log. It counts the way the union does — deduped, enabled groups only — so it is
+    /// true exactly when <see cref="ItemManifest"/> left ids behind.
+    /// </remarks>
+    public bool ManifestTruncated
+    {
+        get
+        {
+            if (RemoteConfig is null)
+                return false;
+
+            // Mirrors ItemManifest's branch: groups when the server sent any, flat otherwise.
+            if (RemoteConfig.ItemManifestGroups is { Count: > 0 })
+            {
+                // Count deduped ids across the enabled groups, stopping as soon as the cap is
+                // exceeded — the answer is settled at that point, so the rest need not be walked.
+                var seen = new HashSet<uint>();
+                foreach (var group in EnabledGroups)
+                {
+                    foreach (var id in group.Ids)
+                    {
+                        if (seen.Add(id) && seen.Count > MaxManifestItems)
+                            return true;
+                    }
+                }
+
+                return false;
+            }
+
+            return RemoteConfig.ItemManifest.Count > MaxManifestItems;
+        }
+    }
+
+    /// <summary>
     /// Union the ids from all enabled groups into a single manifest, with deduplication and
     /// truncation to <see cref="MaxManifestItems"/>.
     /// </summary>

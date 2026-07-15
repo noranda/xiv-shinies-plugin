@@ -72,6 +72,16 @@ public sealed record CollectionSnapshot
     // Not `required`, like the fields above: an empty set is the honest default for a test
     // snapshot that has no manifest-driven categories.
     public IReadOnlySet<string> ManifestDrivenKeys { get; init; } = new HashSet<string>();
+
+    /// <summary>
+    /// True when this pass's item manifest was clipped at the client's ceiling (see
+    /// <see cref="CollectContext.ManifestTruncated"/>) — the server asked about more ids than
+    /// the plugin will scan. A fact about the config, not about this pass's scan: it holds even
+    /// when the pass ran no item scan at all. Carried here because the orchestrator, which holds
+    /// the logger, sees only the snapshot: the runner reports the fact, the caller decides what
+    /// to do with it.
+    /// </summary>
+    public bool ManifestTruncated { get; init; }
 }
 
 /// <summary>
@@ -187,6 +197,7 @@ public static class CollectorRunner
             Durations = durations,
             SourceNotes = sourceNotes,
             ManifestDrivenKeys = manifestDrivenKeys,
+            ManifestTruncated = context.ManifestTruncated,
         };
     }
 }
