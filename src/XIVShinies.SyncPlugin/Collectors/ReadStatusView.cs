@@ -127,12 +127,15 @@ public static class ReadStatusView
     }
 
     /// <summary>
-    /// One collection's line — whether the last pass could read it, and what to do if not — or null
+    /// One collection's note — whether the last pass could read it, and what to do if not — or null
     /// when this collection has nothing to add to the panel.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The line completes the pattern "<c>{DisplayName}: {phrase}</c>", which is why every string in
+    /// A collection that was read is a healthy chip: the label is the collection's own display name,
+    /// and the chip's green check is the whole message, so there is no sentence to carry. A collection
+    /// that was missed is a full line whose text completes the pattern
+    /// "<c>{DisplayName}: {phrase}</c>" — which is why every string in
     /// <see cref="CollectSkipReasons.Describe"/> is written as a phrase rather than a standalone
     /// sentence. Nothing here knows which collection it is describing: the name comes from the row and
     /// the phrase comes from the reason the collector itself reported.
@@ -161,22 +164,30 @@ public static class ReadStatusView
     private static SourceNote? DescribeCollection(CategorySettingsRow row, bool hasContainerLines)
     {
         // No skip reason means the pass read this collection — the healthy resting state, with nothing
-        // for the user to do.
+        // for the user to do, so the note is a chip carrying only the collection's name.
         if (row.SkipReason is not { } reason)
         {
             return row.UsesItemManifest && hasContainerLines
                 ? null
-                : new SourceNote { Text = $"{row.DisplayName}: read.", Tone = SourceTone.Live };
+                : new SourceNote { Label = row.DisplayName, Tone = SourceTone.Live };
         }
 
         // A reason with advice: the collection was missed AND the user can do something about it.
         if (CollectSkipReasons.Describe(reason) is { } hint)
-            return new SourceNote { Text = $"{row.DisplayName}: {hint}", Tone = SourceTone.Missing };
+        {
+            return new SourceNote
+            {
+                Label = row.DisplayName,
+                Text = $"{row.DisplayName}: {hint}",
+                Tone = SourceTone.Missing,
+            };
+        }
 
         // A reason with no advice — a collector bug, an unloadable game sheet. The collection was still
         // missed, so the panel must say so; it just has no action to offer alongside it.
         return new SourceNote
         {
+            Label = row.DisplayName,
             Text = $"{row.DisplayName}: could not be read.",
             Tone = SourceTone.Missing,
         };

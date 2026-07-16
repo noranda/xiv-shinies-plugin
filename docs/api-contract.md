@@ -170,6 +170,7 @@ request without it is rejected with **413**. Maximum body size is **1 MiB** by d
   },
   "itemSources": { // optional — how each storage source was read this pass
     "inventory": {"state": "live"},
+    "currencies": {"state": "live"},
     "saddlebag": {"state": "cached"},
     "retainers": {"state": "cached", "count": 3, "total": 5},
     "armoire": {"state": "loaded"},
@@ -219,7 +220,10 @@ Field constraints:
   once" hints. The retainer entry's `count` is how many retainers the cache remembers; the
   optional `total` is how many the character has, when the game can say — `3` of `5`
   scanned means two retainers contribute nothing yet. Both are counts only; nothing
-  identifies an individual retainer.
+  identifies an individual retainer. `inventory` covers the containers read live each pass
+  (bags, equipped gear, the armoury chest, crystals); `currencies` covers the game's
+  currency subsystem (gil, tomestones, scrips, and the rest), also read live. Source keys
+  evolve additively — the server must accept keys it does not recognize.
 - `fresh: false` means the count came from a cache rather than a live container read. The
   server treats a stale positive as a positive (the item *was* there), so the flag does not
   change the outcome.

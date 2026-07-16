@@ -510,6 +510,10 @@ internal sealed partial class MainWindow : Window, IDisposable
     private void DrawChip(FontAwesomeIcon icon, string text, Vector4 color) =>
         Widgets.DrawChip(iconFont, icon, text, color);
 
+    /// <summary>Binds this window's icon font to <see cref="Widgets.ChipWidth"/>.</summary>
+    private float ChipWidth(FontAwesomeIcon icon, string text) =>
+        Widgets.ChipWidth(iconFont, icon, text);
+
     /// <summary>Binds this window's icon font to <see cref="Widgets.DrawHeaderRightChip"/>.</summary>
     private void DrawHeaderRightChip(FontAwesomeIcon icon, string text, Vector4 color, float rightEdgeScreenX) =>
         Widgets.DrawHeaderRightChip(iconFont, icon, text, color, rightEdgeScreenX);

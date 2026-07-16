@@ -82,8 +82,17 @@ public static class SourceStates
 /// </remarks>
 public static class SourceKeys
 {
-    /// <summary>The containers read live each pass: bags, equipped gear, and the armoury chest.</summary>
+    /// <summary>
+    /// The containers read live each pass: bags, equipped gear, the armoury chest, and crystals.
+    /// </summary>
     public const string Inventory = "inventory";
+
+    /// <summary>
+    /// The character's currencies, read live each pass. Covers both places the game keeps them: the
+    /// Currency inventory container (the common currencies on the in-game Currency tab) and the
+    /// currency subsystem that tracks the rest (scrips, Bicolor Gemstones, ventures, and so on).
+    /// </summary>
+    public const string Currencies = "currencies";
 
     /// <summary>The chocobo saddlebag, including the premium half.</summary>
     public const string Saddlebag = "saddlebag";

@@ -217,27 +217,34 @@ internal sealed partial class MainWindow
     }
 
     /// <summary>
-    /// Draws one labelled group of the "Reading from:" panel — its heading, then its notes — and
-    /// reports whether any note in it was <see cref="SourceTone.Missing"/>. An empty group draws
-    /// nothing at all, heading included.
+    /// Draws one labelled group of the "Reading from:" panel — its heading, its healthy sources as a
+    /// wrapped row of chips, then its full-line notes — and reports whether any note in it was
+    /// <see cref="SourceTone.Missing"/>. An empty group draws nothing at all, heading included.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The heading is what tells the reader which KIND of thing the lines beneath it are — see
+    /// The heading is what tells the reader which KIND of thing the notes beneath it are — see
     /// <see cref="ReadStatus"/> for the two questions the groups answer. Without the labels the two read
     /// as one undifferentiated list of nouns. The label is a parameter rather than a branch on the group
     /// — this method never learns which of the two it is drawing, exactly as it never learns which
-    /// collection or container any individual note came from.
+    /// collection or container any individual note came from. Drawn muted via
+    /// <see cref="DrawSectionLabel"/>, unlike the "Reading from:" heading above it: these headings are
+    /// captions naming the notes beneath them, and the tone-colored notes are what the reader is meant
+    /// to actually read.
     /// </para>
     /// <para>
-    /// Drawn muted via <see cref="DrawSectionLabel"/>, unlike the "Reading from:" heading above it:
-    /// these headings are captions naming the lines beneath them, and the tone-colored notes are what
-    /// the reader is meant to actually read. <see cref="DrawSectionLabel"/> adds the trailing rule
-    /// that turns the caption into a visible section divider.
+    /// The group is exception-first: a healthy source (Live or Cached) has nothing the user must do,
+    /// so it compresses into a small chip — its tone's icon and color, the note's short label, and the
+    /// note's optional detail on hover — while a Missing note keeps a full line, because its text names
+    /// a required in-game action and hover must never be the only way to see one (see
+    /// <see cref="SourceNote"/> for the rule). The chips draw first, as one row that wraps at the
+    /// card's inner edge; the lines follow. Both decisions switch on the TONE alone, never on a source
+    /// key or category name, which is what keeps a future source renderable without touching this
+    /// method.
     /// </para>
     /// </remarks>
     /// <param name="label">The group's heading.</param>
-    /// <param name="notes">The group's lines, already written and toned by the pure builder.</param>
+    /// <param name="notes">The group's notes, already written and toned by the pure builder.</param>
     /// <returns>True when at least one note carries the <see cref="SourceTone.Missing"/> tone.</returns>
     private bool DrawReadStatusGroup(string label, IReadOnlyList<SourceNote> notes)
     {
@@ -249,13 +256,55 @@ internal sealed partial class MainWindow
         ImGui.Dummy(new Vector2(0f, 4f * ImGuiHelpers.GlobalScale));
         DrawSectionLabel(label);
 
+        // A Missing note renders as a full line ONLY while it actually carries one; the builders
+        // guarantee it always does (see SourceNote), and a note that somehow arrived without a text
+        // degrades to a chip rather than being dropped or crashing the draw.
+        static bool IsLineForm(SourceNote note) =>
+            note.Tone is SourceTone.Missing && note.Text is not null;
+
+        // --- The chip row -----------------------------------------------------------------------
+        // All healthy notes, side by side, wrapping at the card's inner edge. The wrap decision has
+        // to happen before each chip is drawn (a drawn chip has already reserved its footprint), so
+        // the row is laid out from measured widths in cursor space — the same coordinate space
+        // activeCardInnerRight arrives in (see DrawSectionLabel for the two-space distinction).
+        var innerRight = activeCardInnerRight
+            ?? (ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X);
+        var chipGap = 6f * ImGuiHelpers.GlobalScale;
+
+        var anyChipDrawn = false;
+        var rowRight = 0f; // cursor-space right edge of the last chip drawn
+
+        foreach (var note in notes)
+        {
+            if (IsLineForm(note))
+                continue;
+
+            var icon = ToneIcon(note.Tone);
+            var width = ChipWidth(icon, note.Label);
+
+            // DrawChip ends each chip's row (its footprint Dummy advances the cursor to the next
+            // line), so continuing the row is the explicit act: SameLine only when this chip still
+            // fits before the card's inner edge. When it does not, the cursor is already sitting at
+            // the start of a fresh line and the row simply wraps.
+            if (anyChipDrawn && rowRight + chipGap + width <= innerRight)
+                ImGui.SameLine(0f, chipGap);
+
+            var chipStart = ImGui.GetCursorPosX();
+            DrawChip(icon, note.Label, ToneColor(note.Tone));
+            rowRight = chipStart + width;
+            anyChipDrawn = true;
+
+            // The optional hover copy: what the source covers, or an optional refresh action. Read
+            // right after the chip, whose reserved footprint is the item IsItemHovered answers for.
+            if (note.Detail is { } detail && ImGui.IsItemHovered())
+                Widgets.DrawTooltip(detail);
+        }
+
+        // --- The full lines ---------------------------------------------------------------------
         var hasMissingNote = false;
 
         foreach (var note in notes)
         {
-            // Drawn at Widgets.InlineIconScale, like every other inline status icon (see the constant).
-            DrawIconedText(ToneIcon(note.Tone), ToneColor(note.Tone), note.Text, Widgets.InlineIconScale);
-
             // Cached does not count as missing (see SourceNoteText for why Cached is a healthy resting
             // state rather than a gap): gating the caller's follow-up hint on it too would make that
             // hint permanent noise that never clears. Missing is different — it means the source is
@@ -263,6 +312,12 @@ internal sealed partial class MainWindow
             // that changes that.
             if (note.Tone is SourceTone.Missing)
                 hasMissingNote = true;
+
+            if (!IsLineForm(note) || note.Text is not { } text)
+                continue;
+
+            // Drawn at Widgets.InlineIconScale, like every other inline status icon (see the constant).
+            DrawIconedText(ToneIcon(note.Tone), ToneColor(note.Tone), text, Widgets.InlineIconScale);
         }
 
         return hasMissingNote;

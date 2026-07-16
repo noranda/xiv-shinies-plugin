@@ -189,10 +189,13 @@ public sealed unsafe class ItemCollector : ICollector
         TallyCurrencyFallback(manifestIds, live);
 
         // Reaching this point means the inventory manager was readable and every live container was
-        // walked, so the inventory source is genuinely live this pass. The currency-manager fallback
-        // above reads the same current game memory, so its counts are live too; whether it ran at all
-        // does not change this note (a null manager leaves the walk's results standing).
+        // walked, so both live sources are genuinely live this pass. Currencies are reported as their
+        // own source even though they ride the same scan: the Currency container is one of the live
+        // containers walked above, and the currency-manager fallback reads the same current game
+        // memory, so one state is truthful for both reads. Whether the fallback ran at all does not
+        // change the note (a null manager leaves the walk's results standing).
         sourceNotes[SourceKeys.Inventory] = new ItemSourceStatus { State = SourceStates.Live };
+        sourceNotes[SourceKeys.Currencies] = new ItemSourceStatus { State = SourceStates.Live };
 
         // CACHED TALLY — the armoire, glamour dresser, saddlebags, and retainers, plus their notes.
         BuildCachedTallies(manifestIds, cached, sourceNotes);
