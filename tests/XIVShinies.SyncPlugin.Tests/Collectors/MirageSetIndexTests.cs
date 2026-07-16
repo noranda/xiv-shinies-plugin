@@ -77,94 +77,98 @@ public class MirageSetIndexTests
         Assert.Empty(MirageSetIndex.Build(Array.Empty<(uint, uint[])>()));
     }
 
-    // No bits set means the outfit is empty (every piece withdrawn), so nothing is stored.
+    // A bit is set when its piece has been WITHDRAWN, so zero bits means nothing has left the
+    // outfit — a freshly stored, complete outfit reads 0 and every non-empty column is stored.
     [Fact]
-    public void No_bits_set_yields_nothing()
+    public void No_bits_set_yields_every_non_empty_piece()
     {
         var pieces = new uint[] { 101, 102, 103, 0, 0, 0, 0, 0, 0, 0, 0 };
 
-        Assert.Empty(MirageSetIndex.StoredPieces(pieces, 0));
+        Assert.Equal(new uint[] { 101, 102, 103 }, MirageSetIndex.StoredPieces(pieces, 0).ToArray());
     }
 
-    // Bit i selects the piece at column i. Checked across every column so a bit-order slip anywhere
-    // in the 11 slots is caught, not just at the ends.
+    // Setting bit i withdraws exactly the piece at column i. Checked across every column so a
+    // bit-order slip anywhere in the 11 slots is caught, not just at the ends.
     [Fact]
-    public void Each_single_bit_selects_its_own_column()
+    public void Each_single_bit_withdraws_its_own_column()
     {
         var pieces = new uint[] { 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20 };
 
         for (var column = 0; column < 11; column++)
         {
             var bits = (ushort)(1 << column);
+            var expected = pieces.Where((_, index) => index != column).ToArray();
 
-            Assert.Equal(new[] { pieces[column] }, MirageSetIndex.StoredPieces(pieces, bits).ToArray());
+            Assert.Equal(expected, MirageSetIndex.StoredPieces(pieces, bits).ToArray());
         }
     }
 
-    // A partly-stored outfit: two pieces in, the rest withdrawn.
+    // A partly-emptied outfit: two pieces withdrawn, the rest still stored.
     [Fact]
-    public void Multiple_bits_select_their_pieces()
+    public void Multiple_bits_withdraw_their_pieces()
     {
         var pieces = new uint[] { 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20 };
-        var bits = (ushort)((1 << 1) | (1 << 3)); // OffHand + Body
+        var bits = (ushort)((1 << 1) | (1 << 3)); // OffHand + Body withdrawn
 
-        Assert.Equal(new uint[] { 11, 13 }, MirageSetIndex.StoredPieces(pieces, bits).ToArray());
+        Assert.Equal(
+            new uint[] { 10, 12, 14, 15, 16, 17, 18, 19, 20 },
+            MirageSetIndex.StoredPieces(pieces, bits).ToArray());
     }
 
-    // A fully-stored outfit selects every non-empty column.
+    // Every slot's bit set means every piece has been withdrawn — the outfit is empty.
     [Fact]
-    public void All_eleven_bits_select_every_non_empty_piece()
+    public void All_eleven_bits_yield_nothing()
     {
         var pieces = new uint[] { 10, 0, 12, 0, 14, 0, 16, 0, 18, 0, 20 };
 
-        var stored = MirageSetIndex.StoredPieces(pieces, 0x7FF).ToArray();
-
-        Assert.Equal(new uint[] { 10, 12, 14, 16, 18, 20 }, stored);
+        Assert.Empty(MirageSetIndex.StoredPieces(pieces, 0x7FF));
     }
 
-    // Only 11 slots exist; a stray high bit (from padding or a wider field) must not read past the
-    // piece array or invent a piece.
+    // Only 11 slots exist; a stray high bit (from padding or a wider field) must not withdraw a
+    // real slot or read past the piece array — the 11 real columns resolve as if it were absent.
     [Fact]
     public void Bits_above_the_slot_count_are_ignored()
     {
         var pieces = new uint[] { 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20 };
         var bits = unchecked((ushort)0xF800); // bits 11..15 set, all above the 11 slots
 
-        Assert.Empty(MirageSetIndex.StoredPieces(pieces, bits));
+        Assert.Equal(pieces, MirageSetIndex.StoredPieces(pieces, bits).ToArray());
     }
 
-    // A set bit over an empty column contributes nothing — the outfit has no piece there. (Armor
-    // outfits leave, e.g., the weapon slots empty, so this is the common case, not an edge.)
+    // An empty column (ID 0) contributes nothing even while its bit reads as stored — armor
+    // outfits leave the weapon slots empty, so this is the common case, not an edge.
     [Fact]
-    public void A_set_bit_over_an_empty_column_is_skipped()
+    public void A_stored_bit_over_an_empty_column_is_skipped()
     {
         var pieces = new uint[] { 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-        var bits = (ushort)((1 << 0) | (1 << 1)); // MainHand (empty) + OffHand (present)
 
-        Assert.Equal(new uint[] { 11 }, MirageSetIndex.StoredPieces(pieces, bits).ToArray());
+        // No withdrawals at all: only the one real piece comes back, never the empty MainHand.
+        Assert.Equal(new uint[] { 11 }, MirageSetIndex.StoredPieces(pieces, 0).ToArray());
     }
 
     // A piece array shorter than the 11 slots (a defensive guard, since Build always emits 11-wide
-    // rows) must still never be read past its end, even when a high bit points at a missing slot.
+    // rows) must never be read past its end — slots beyond the array simply do not exist.
     [Fact]
-    public void A_bit_past_the_end_of_a_short_array_reads_nothing()
+    public void A_short_array_is_never_read_past_its_end()
     {
         var pieces = new uint[] { 10, 11 }; // only two slots present
 
-        // Bit 5 would select a sixth slot that does not exist in this array.
-        Assert.Empty(MirageSetIndex.StoredPieces(pieces, 1 << 5));
-        // The bits that DO fall inside the array still resolve normally.
-        Assert.Equal(new uint[] { 10, 11 }, MirageSetIndex.StoredPieces(pieces, 0b11).ToArray());
+        // Nothing withdrawn: both real slots come back and no third slot is invented.
+        Assert.Equal(new uint[] { 10, 11 }, MirageSetIndex.StoredPieces(pieces, 0).ToArray());
+        // Withdrawing the second slot leaves the first; bit 5 has no slot to affect.
+        Assert.Equal(
+            new uint[] { 10 },
+            MirageSetIndex.StoredPieces(pieces, (1 << 1) | (1 << 5)).ToArray());
     }
 
     // Two columns can name the same item (e.g. a matched ring pair). Each stored slot is a separate
-    // physical copy, so the id is yielded once per set bit — the tally sums them into a count of two.
+    // physical copy, so the id is yielded once per stored slot — the tally sums them into a count
+    // of two.
     [Fact]
     public void A_piece_shared_by_two_columns_is_yielded_once_per_stored_slot()
     {
         var pieces = new uint[] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 500, 500 }; // Bracelets + Ring, same id
-        var bits = (ushort)((1 << 9) | (1 << 10));
 
-        Assert.Equal(new uint[] { 500, 500 }, MirageSetIndex.StoredPieces(pieces, bits).ToArray());
+        Assert.Equal(new uint[] { 500, 500 }, MirageSetIndex.StoredPieces(pieces, 0).ToArray());
     }
 }

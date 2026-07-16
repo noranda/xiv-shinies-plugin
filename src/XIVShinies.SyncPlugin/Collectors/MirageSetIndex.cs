@@ -56,9 +56,11 @@ public static class MirageSetIndex
     /// <summary>Yields the piece IDs a stored outfit currently holds, per its unlock bits.</summary>
     /// <param name="pieceItemIds">The outfit's pieces in column order (from <see cref="Build"/>).</param>
     /// <param name="unlockBits">
-    /// One bit per slot: bit <c>i</c> set means slot <c>i</c>'s piece is stored in the outfit. A
-    /// piece can be withdrawn from an outfit individually, which clears its bit, so this is what
-    /// keeps the expansion honest about a partly-emptied outfit.
+    /// One bit per slot, and the polarity is "unlocked FROM the outfit": bit <c>i</c> <b>set</b>
+    /// means slot <c>i</c>'s piece has been withdrawn, bit <b>clear</b> means it is currently
+    /// stored — a freshly stored, complete outfit reads 0. Verified in-game against a partial
+    /// outfit (only the stored piece's bit was clear). Withdrawing a piece sets its bit, so this
+    /// is what keeps the expansion honest about a partly-emptied outfit.
     /// </param>
     public static IEnumerable<uint> StoredPieces(uint[] pieceItemIds, ushort unlockBits)
     {
@@ -72,11 +74,12 @@ public static class MirageSetIndex
 
         for (var slot = 0; slot < slots; slot++)
         {
-            var stored = (unlockBits & (1 << slot)) != 0;
+            // Bit set = withdrawn (see the unlockBits doc above), so a clear bit is a stored piece.
+            var withdrawn = (unlockBits & (1 << slot)) != 0;
 
-            // An empty slot (ID 0) contributes nothing even when its bit is set — armor outfits leave
-            // the weapon slots empty, so this is the ordinary case, not a rare one.
-            if (stored && pieceItemIds[slot] != 0)
+            // An empty slot (ID 0) contributes nothing even when its bit reads as stored — armor
+            // outfits leave the weapon slots empty, so this is the ordinary case, not a rare one.
+            if (!withdrawn && pieceItemIds[slot] != 0)
                 yield return pieceItemIds[slot];
         }
     }
