@@ -41,9 +41,11 @@ public class SourceNoteTextTests
 
     // Currencies are scanned alongside the inventory (the Currency container plus the game's
     // currency subsystem), so they get a chip of their own — without it the panel would imply
-    // currencies are never read.
+    // currencies are never read. The detail also discloses the one gap in that coverage: the
+    // game only exposes a content-bound currency (Occult Crescent's pieces, for example) while
+    // the character is inside that content, so those counts sync from in-zone visits.
     [Fact]
-    public void Live_currencies_are_a_chip_naming_what_they_cover()
+    public void Live_currencies_are_a_chip_naming_what_they_cover_and_the_content_bound_gap()
     {
         var note = SourceNoteText.Describe(SourceKeys.Currencies, Status(SourceStates.Live));
 
@@ -51,7 +53,9 @@ public class SourceNoteTextTests
         Assert.Equal(SourceTone.Live, note.Tone);
         Assert.Null(note.Text);
         Assert.Equal(
-            "Gil, tomestones, scrips, and the game's other currencies — read directly this pass.",
+            "Gil, tomestones, scrips, and the game's other currencies — read directly this " +
+            "pass. Currencies bound to a specific piece of content, like Occult Crescent's " +
+            "pieces, can only be read while inside it.",
             note.Detail);
     }
 

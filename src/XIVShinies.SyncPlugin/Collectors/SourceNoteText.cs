@@ -59,14 +59,18 @@ public static class SourceNoteText
 
             // Currencies are read in the same live pass as the inventory, but they are their own
             // source: part of them lives outside any container, in the game's currency subsystem.
-            // The detail says what the key covers in a player's vocabulary.
+            // The detail says what the key covers in a player's vocabulary — and discloses the
+            // one gap in it: the game only exposes a content-bound currency (Occult Crescent's
+            // pieces, for example) while the character is inside that content, so those counts
+            // can only sync from in-zone visits.
             (SourceKeys.Currencies, SourceStates.Live) =>
                 new SourceNote
                 {
                     Label = "Currencies",
                     Tone = SourceTone.Live,
                     Detail = "Gil, tomestones, scrips, and the game's other currencies — read " +
-                        "directly this pass.",
+                        "directly this pass. Currencies bound to a specific piece of content, " +
+                        "like Occult Crescent's pieces, can only be read while inside it.",
                 },
 
             // Cached is this source's healthy resting state: the game never exposes a live read of
