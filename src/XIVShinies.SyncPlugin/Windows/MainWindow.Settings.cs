@@ -192,8 +192,8 @@ internal sealed partial class MainWindow
             // Normal text color: this sentence is what tells the user the log is a memory-only
             // record rather than a permanent one, so it is an explanation they need to read.
             DrawWrapped(
-                "What this plugin sent recently. Kept in memory only — the log clears when the " +
-                "plugin unloads.",
+                "What this plugin sent recently. Kept in memory only — the log clears on logout " +
+                "and when the plugin unloads.",
                 ImGuiCol.Text);
             ImGui.Spacing();
 

@@ -402,20 +402,37 @@ internal sealed class SyncManager : IDisposable
     /// </remarks>
     public void RequestManualSync()
     {
-        var now = timeProvider.GetUtcNow();
-
+        // Volatile, so this write is safe from any thread — and it should clear immediately, on
+        // the press itself, rather than waiting behind the marshal below.
         blockedPendingUserAction = false;
 
-        // Identity capture can give up (a home world that never resolved), and only a fresh login
-        // re-arms it. Without this, "Sync now" would queue a sweep that the `identity is null` guard
-        // silently drops on every frame, and the button would appear to do nothing at all.
-        if (identity is null && clientState.IsLoggedIn)
+        // Marshaled rather than run inline: this method is called from the window's draw call,
+        // which Dalamud does not promise to invoke on the framework thread, and the identity-rearm
+        // fields below belong to the framework thread's single-writer discipline (loginSettledAt
+        // is a struct field the framework tick reads every frame). The same pattern, for the same
+        // reason, as RequestOnboardingConfigPoll's marshal. The scheduler request rides inside the
+        // marshal too, so the rearm always lands before the sweep it exists to unblock.
+        _ = framework.RunOnFrameworkThread(() =>
         {
-            loginSettledAt = now;
-            identityAttempts = 0;
-        }
+            // A marshal queued just before teardown still runs; starting work against a cancelled
+            // lifetime would only be discarded a moment later.
+            if (lifetimeToken.IsCancellationRequested)
+                return;
 
-        scheduler.Request(SyncTrigger.Manual, now);
+            var now = timeProvider.GetUtcNow();
+
+            // Identity capture can give up (a home world that never resolved), and only a fresh
+            // login re-arms it. Without this, "Sync now" would queue a sweep that the
+            // `identity is null` guard silently drops on every frame, and the button would appear
+            // to do nothing at all.
+            if (identity is null && clientState.IsLoggedIn)
+            {
+                loginSettledAt = now;
+                identityAttempts = 0;
+            }
+
+            scheduler.Request(SyncTrigger.Manual, now);
+        });
     }
 
     /// <summary>
@@ -566,6 +583,12 @@ internal sealed class SyncManager : IDisposable
         // Queued work belongs to the character that queued it. Uploading it after a character switch
         // would attribute one character's unlocks to another.
         scheduler.Reset();
+
+        // The upload log's entries describe the departing character's uploads, and its change-diff
+        // baselines on the nearest older entry per category — left in place, the next character's
+        // first sync would be compared against the PREVIOUS character's counts and light up gold
+        // "(changed)" marks for differences no one earned. Character-scoped, like everything above.
+        uploadLog.Clear();
     }
 
     /// <summary>

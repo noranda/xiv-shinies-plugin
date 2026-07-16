@@ -22,6 +22,13 @@ namespace XIVShinies.SyncPlugin.Sync;
 /// Never silent: every truncation is reported so the caller can log it. A silently capped
 /// payload would read as "covered everything" when it did not.
 /// </para>
+/// <para>
+/// These entry caps are also the client's only defense against the contract's 1 MiB body
+/// limit — no serialized byte size is measured. Real payloads sit far below both ceilings
+/// (a few thousand ids, a manifest in the low thousands), and if a body ever did exceed
+/// the limit, the server's 413 is handled as a terminal drop and the next full sweep
+/// re-sends everything, which monotonic writes make safe.
+/// </para>
 /// </remarks>
 public static class PayloadCaps
 {
