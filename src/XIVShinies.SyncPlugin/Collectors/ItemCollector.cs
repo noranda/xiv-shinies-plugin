@@ -10,6 +10,10 @@ using XIVShinies.SyncPlugin.Api;
 // Excel sheet (the list of what the armoire can hold). An alias keeps them apart.
 using CabinetSheet = Lumina.Excel.Sheets.Cabinet;
 
+// The sheet listing every glamour-dresser outfit and the pieces inside it. Aliased for a short,
+// intent-revealing name at the one place it is read.
+using MirageSetSheet = Lumina.Excel.Sheets.MirageStoreSetItem;
+
 namespace XIVShinies.SyncPlugin.Collectors;
 
 /// <summary>
@@ -40,7 +44,8 @@ namespace XIVShinies.SyncPlugin.Collectors;
 /// </para>
 /// <para>
 /// Reads game memory through FFXIVClientStructs, so it must run on the framework thread and cannot
-/// be unit-tested. The pure logic it builds on — <see cref="ArmoireIndex"/> (the armoire lookup) and
+/// be unit-tested. The pure logic it builds on — <see cref="ArmoireIndex"/> (the armoire lookup),
+/// <see cref="MirageSetIndex"/> (expanding a stored outfit into its pieces), and
 /// <see cref="ItemTallies.BuildPossessions"/> (turning the tallies into wire entries) — is covered by
 /// tests; the container reads themselves are verified by in-game QA.
 /// </para>
@@ -55,6 +60,10 @@ public sealed unsafe class ItemCollector : ICollector
 
     // Built on first use and reused. The sheet never changes while the game is running.
     private IReadOnlyDictionary<uint, uint>? armoireIndex;
+
+    // Built on first use and reused, same as armoireIndex. Maps a glamour-dresser outfit's set id to
+    // the pieces inside it, so a piece stored "as an outfit" can be counted (see TallyGlamourDresser).
+    private IReadOnlyDictionary<uint, uint[]>? mirageSetIndex;
 
     // How this collection names and describes itself to the user.
     private readonly CategoryInfo info;
@@ -152,8 +161,10 @@ public sealed unsafe class ItemCollector : ICollector
             return CollectResult.Skipped(CollectSkipReasons.InventoryUnavailable);
 
         // The set of ids the manifest asks about, built once so each slot walked below is an O(1)
-        // membership test. A HashSet also collapses any duplicate manifest entries, so a source that
-        // holds exactly one copy (armoire, glamour dresser) is never counted twice.
+        // membership test. A HashSet also collapses any duplicate manifest entries, so the armoire —
+        // which holds a single copy per item — is never counted twice for one manifest id. (Counts
+        // still sum ACROSS sources: the same item held in a bag and on a retainer contributes from
+        // both, and a dresser can legitimately hold a piece both loosely and inside an outfit.)
         var manifestIds = new HashSet<uint>(manifest);
 
         // Two parallel tallies, keyed by item id: what the live containers hold, and what the caches
@@ -364,34 +375,13 @@ public sealed unsafe class ItemCollector : ICollector
             notes[SourceKeys.Saddlebag] = new ItemSourceStatus { State = SourceStates.Unscanned };
         }
 
-        // GLAMOUR DRESSER. Readable once opened this session; the game caches the stored ids.
+        // GLAMOUR DRESSER. Readable once opened this session; the game caches the stored ids. The
+        // outfit-expansion index is resolved once here rather than inside the per-slot loop; a
+        // momentarily unreadable sheet leaves it null, and the walk still counts individually-stored
+        // gear, only skipping outfit expansion for this pass (the next pass retries the sheet).
         if (finder->IsGlamourDresserCached)
         {
-            // KNOWN GAP: this finds gear stored in the dresser INDIVIDUALLY. Gear stored "as an outfit"
-            // occupies a dresser slot whose id is the outfit's set id (a MirageStoreSetItem row), not
-            // the id of any piece inside it — so a piece stored that way does not match here, while the
-            // same piece stored individually does.
-            //
-            // How wide the gap is depends on the game's curation: only gear with a MirageStoreSetItem
-            // row can be stored as an outfit, and the game keeps ADDING sets over time — so no class of
-            // gear can be assumed safe from hiding here, and the assumption must be re-checked whenever
-            // the manifest grows. Weapons and tools are the one durable exception: outfits are armor
-            // sets, so they can never be outfit-stored.
-            //
-            // The standing rule, then: before any GEAR ids join the manifest, intersect them with the
-            // member item ids of every MirageStoreSetItem row. If the intersection is empty, nothing is
-            // needed yet. If it is not, pair each dresser slot's id with its set-unlock bits
-            // (ItemFinderModule keeps both, and both survive a logout) and map set id + slot to a piece
-            // through that same sheet — otherwise a piece stored as an outfit reads as not owned.
-            //
-            // The dresser stores a single copy per slot, so each id match tallies 1 (again Nq only —
-            // no quality flags are exposed for the cached ids).
-            foreach (var storedId in finder->GlamourDresserItemIds)
-            {
-                if (storedId != 0 && manifestIds.Contains(storedId))
-                    AccumulateNq(cached, storedId, 1);
-            }
-
+            TallyGlamourDresser(finder, GetMirageSetIndex(), manifestIds, cached);
             notes[SourceKeys.GlamourDresser] = new ItemSourceStatus { State = SourceStates.Cached };
         }
         else
@@ -510,6 +500,55 @@ public sealed unsafe class ItemCollector : ICollector
         }
     }
 
+    /// <summary>
+    /// Adds every manifest-matching glamour-dresser slot to the cached tally, expanding stored
+    /// outfits into their pieces.
+    /// </summary>
+    /// <remarks>
+    /// A dresser slot holds either an item's own id or an outfit's <b>set id</b> (a
+    /// <c>MirageStoreSetItem</c> row). An individual slot is counted directly; an outfit slot stands
+    /// in for the pieces stored inside it, which the slot's id alone does not name. The dresser keeps
+    /// two arrays paired by slot index — the stored id and that slot's outfit unlock bits — so the set
+    /// id maps through <paramref name="setIndex"/> to the set's pieces and the bits (read from
+    /// <c>ItemFinderModule</c>, not <c>MirageManager.IsSetSlotUnlocked</c>, whose data is cleared on a
+    /// zone change) say which of them are actually stored right now. A slot's own id and its expanded
+    /// pieces are different item ids, so a manifest that lists both counts both. Everything lands in
+    /// the Nq bucket — the cache exposes no quality flags — and each stored piece counts one copy.
+    /// </remarks>
+    private static void TallyGlamourDresser(
+        ItemFinderModule* finder,
+        IReadOnlyDictionary<uint, uint[]>? setIndex,
+        HashSet<uint> manifestIds,
+        Dictionary<uint, ItemTally> cached)
+    {
+        // Hoisted to locals and walked with one min-bounded loop so a length mismatch between the two
+        // parallel arrays can never read past the shorter one.
+        var ids = finder->GlamourDresserItemIds;
+        var bits = finder->GlamourDresserItemSetUnlockBits;
+
+        for (var slot = 0; slot < ids.Length && slot < bits.Length; slot++)
+        {
+            var storedId = ids[slot];
+            if (storedId == 0)
+                continue;
+
+            // The slot's own id — an individually stored item, or (harmlessly) an outfit set id that
+            // the manifest happens to list in its own right.
+            if (manifestIds.Contains(storedId))
+                AccumulateNq(cached, storedId, 1);
+
+            // If the slot holds an outfit, expand its set id into the pieces currently stored inside.
+            if (setIndex is not null && setIndex.TryGetValue(storedId, out var pieces))
+            {
+                foreach (var pieceId in MirageSetIndex.StoredPieces(pieces, bits[slot]))
+                {
+                    if (manifestIds.Contains(pieceId))
+                        AccumulateNq(cached, pieceId, 1);
+                }
+            }
+        }
+    }
+
     // Adds a live-container quantity to an id's tally, routing it into exactly one quality bucket.
     private static void AccumulateLive(
         Dictionary<uint, ItemTally> tallies,
@@ -587,5 +626,56 @@ public sealed unsafe class ItemCollector : ICollector
             rows.Add((row.RowId, row.Item.RowId));
 
         return ArmoireIndex.Build(rows);
+    }
+
+    // Resolves the outfit-expansion index, building it on first use. Same retry-on-null discipline as
+    // the armoire index (see IsStoredInArmoire): a momentarily unreadable sheet leaves the field null
+    // so the next pass retries, rather than caching an empty index that would disable expansion for
+    // the rest of the session. Returns null when the sheet still cannot be read.
+    private IReadOnlyDictionary<uint, uint[]>? GetMirageSetIndex()
+    {
+        if (mirageSetIndex is not null)
+            return mirageSetIndex;
+
+        var built = TryBuildMirageSetIndex();
+        if (built is not null)
+            mirageSetIndex = built;
+
+        return built;
+    }
+
+    // Returns null when the sheet could not be read, so the caller knows not to cache the result.
+    private IReadOnlyDictionary<uint, uint[]>? TryBuildMirageSetIndex()
+    {
+        var sheet = dataManager.GetExcelSheet<MirageSetSheet>();
+        if (sheet is null)
+            return null;
+
+        var rows = new List<(uint SetItemId, uint[] PieceItemIds)>();
+        foreach (var row in sheet)
+        {
+            // The set's 11 slot columns in sheet order. This order is load-bearing: a stored outfit's
+            // unlock bit i refers to the piece at index i, so it must line up with MirageStoreSetItem's
+            // columns (MainHand, OffHand, Head, Body, Hands, Legs, Feet, Earrings, Necklace, Bracelets,
+            // Ring). Empty slots resolve to id 0 and stay in place — StoredPieces drops them, Build does
+            // not. .RowId reads the referenced Item row's id (0 when the column links nothing).
+            var pieces = new uint[]
+            {
+                row.MainHand.RowId,
+                row.OffHand.RowId,
+                row.Head.RowId,
+                row.Body.RowId,
+                row.Hands.RowId,
+                row.Legs.RowId,
+                row.Feet.RowId,
+                row.Earrings.RowId,
+                row.Necklace.RowId,
+                row.Bracelets.RowId,
+                row.Ring.RowId,
+            };
+            rows.Add((row.RowId, pieces));
+        }
+
+        return MirageSetIndex.Build(rows);
     }
 }
