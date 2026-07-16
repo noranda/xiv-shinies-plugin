@@ -37,6 +37,18 @@ public sealed record CollectContext
     public IReadOnlySet<string> EnabledItemGroupKeys { get; init; } = new HashSet<string>();
 
     /// <summary>
+    /// The server's omit-when-unseen ids as a set the item collector can probe per manifest id
+    /// (see <see cref="ConfigResponse.ItemOmitWhenUnseenIds"/> for what the ids mean). Empty
+    /// when no config has been fetched or the server does not send the field — both read as
+    /// "omit nothing", which is the explicit-zero behavior every other id gets.
+    /// </summary>
+    // Recomputed on each read like ItemManifest below; the collector reads it once per pass.
+    public IReadOnlySet<uint> ItemOmitWhenUnseenIds =>
+        RemoteConfig?.ItemOmitWhenUnseenIds is { } ids
+            ? new HashSet<uint>(ids)
+            : new HashSet<uint>();
+
+    /// <summary>
     /// The subset of the server's item manifest groups whose key is in
     /// <see cref="EnabledItemGroupKeys"/>, in the server's original order. Empty when groups
     /// are null (flat manifest path) or when no groups are enabled. Collectors use this to

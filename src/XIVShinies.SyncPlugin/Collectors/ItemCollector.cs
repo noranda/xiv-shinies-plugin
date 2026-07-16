@@ -200,12 +200,17 @@ public sealed unsafe class ItemCollector : ICollector
         // CACHED TALLY — the armoire, glamour dresser, saddlebags, and retainers, plus their notes.
         BuildCachedTallies(manifestIds, cached, sourceNotes);
 
-        // ItemTallies applies the explicit-zero rule (one entry per valid manifest id) and the
+        // ItemTallies applies the explicit-zero rule (one entry per valid manifest id), the
+        // omit-when-unseen exception for the server's content-bound currency ids, and the
         // freshness rule (any cache contribution marks the entry not fresh). Named arguments are
         // mandatory: the two dictionaries share a type, and transposing them would invert every
         // Fresh flag silently.
         return CollectResult.Items(
-            ItemTallies.BuildPossessions(manifest: manifest, live: live, cached: cached),
+            ItemTallies.BuildPossessions(
+                manifest: manifest,
+                live: live,
+                cached: cached,
+                omitWhenUnseen: context.ItemOmitWhenUnseenIds),
             sourceNotes);
     }
 
@@ -314,7 +319,10 @@ public sealed unsafe class ItemCollector : ICollector
 
             // Held amount for this currency. Currencies carry no quality, so the whole count is normal
             // quality (the Nq bucket). A zero here adds nothing the manifest's explicit zero does not
-            // already report, so skip it rather than create an all-zero live entry.
+            // already report, so skip it rather than create an all-zero live entry. For an id in the
+            // server's omit-when-unseen set this makes a genuine zero balance indistinguishable from
+            // unseen, so it uploads as an omission rather than a zero — equivalent on the server,
+            // which drops all-zero entries for those ids at apply time anyway.
             var count = currency->GetItemCount(id);
             if (count == 0)
                 continue;

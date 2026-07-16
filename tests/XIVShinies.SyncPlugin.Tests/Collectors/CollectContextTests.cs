@@ -52,6 +52,33 @@ public class CollectContextTests
         Assert.Empty(context.ItemManifest);
     }
 
+    // The omit-when-unseen ids reach the item collector through this funnel, as a set it can
+    // probe per manifest id. No config, or a server that does not send the field (an older
+    // server is a supported peer), both read as "omit nothing".
+    [Fact]
+    public void The_omit_when_unseen_set_is_empty_without_a_config_or_the_field()
+    {
+        Assert.Empty(new CollectContext { RemoteConfig = null }.ItemOmitWhenUnseenIds);
+        Assert.Empty(
+            new CollectContext { RemoteConfig = ConfigWith(new uint[] { 42 }) }
+                .ItemOmitWhenUnseenIds);
+    }
+
+    [Fact]
+    public void The_omit_when_unseen_ids_surface_as_a_probeable_set()
+    {
+        var config = ConfigWith(new uint[] { 45043, 42 }) with
+        {
+            ItemOmitWhenUnseenIds = new uint[] { 45043, 45044 },
+        };
+
+        var set = new CollectContext { RemoteConfig = config }.ItemOmitWhenUnseenIds;
+
+        Assert.Contains(45043u, set);
+        Assert.Contains(45044u, set);
+        Assert.DoesNotContain(42u, set);
+    }
+
     [Fact]
     public void A_sane_manifest_passes_through_untouched()
     {

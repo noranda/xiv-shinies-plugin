@@ -115,6 +115,7 @@ read per request, so a flipped kill switch reaches the plugin on its next poll.
     {"key": "relic-materials", "label": "Relic materials", "ids": [5106]},
     {"key": "relic-currencies", "label": "Currencies (including gil)", "ids": [1, 28]}
   ],
+  "itemOmitWhenUnseenIds": [45043, 45044], // content-bound ids: omit from uploads when no source saw them
   "manifestVersion": "a1b2c3d4e5f6"
 }
 ```
@@ -135,11 +136,22 @@ read per request, so a flipped kill switch reaches the plugin on its next poll.
   groups, deduplicated in first-seen order (an id may legitimately appear in more than one
   group). A config with no groups field — or an empty array — falls back to the flat
   `itemManifest`.
-- **`manifestVersion`.** A content hash (the first 12 hex characters of the SHA-256 of the
-  serialized manifest array). It changes iff the manifest changes, so the plugin can skip
-  re-scanning inventory when the version it last scanned against is unchanged. Echo it back
-  in the sync payload's optional `manifestVersion` field. Compare for equality only — it is
-  a hash, not a counter.
+- **`itemOmitWhenUnseenIds`** (optional). Manifest ids whose entry the plugin must **omit
+  from the upload when no scan source resolved a value**, instead of reporting the explicit
+  `count: 0`. These are the content-bound currencies (Occult Crescent's pieces, for
+  example): the game only exposes their counts while the character is inside that content,
+  so out-of-zone their absence means "not visible from here", never "owns none" — an
+  explicit zero would clobber the real count the server holds. A value resolved by any
+  source is sent normally. Always a subset of the served count-group ids; a config without
+  the field omits nothing. In practice the plugin's readers only record nonzero counts, so
+  a genuine in-zone zero balance also reaches the server as an omission — equivalent under
+  the server's apply-time backstop, which drops all-zero entries for these ids anyway (that
+  backstop also covers older clients that still send explicit zeros).
+- **`manifestVersion`.** A content hash, changing whenever the served manifest content —
+  the groups and the omit-when-unseen set — changes, so the plugin can skip re-scanning
+  inventory when the version it last scanned against is unchanged. Echo it back in the
+  sync payload's optional `manifestVersion` field. Compare for equality only — it is a
+  hash, not a counter.
 
 Statuses: **200**, **401**, **405** (non-GET).
 
@@ -211,7 +223,10 @@ Field constraints:
   a count *means* is decided per id by which manifest group the id belongs to — see the
   proof vs. count-tracked split under [Behavior](#behavior-the-plugin-author-should-know).
   Uploads are filtered to the served manifest at apply time, so stale-manifest or
-  out-of-catalog ids are dropped before writing.
+  out-of-catalog ids are dropped before writing. The one exception: ids the config lists
+  in `itemOmitWhenUnseenIds` are OMITTED when no source resolved them (see the `/config`
+  section) — for a content-bound currency, "absent" is the honest report of "not visible
+  from here".
 - **Per-quality counts.** `count` is normal-quality copies only; optional `hqCount` and
   `collectableCount` are omitted when zero. The plugin never sums qualities; whether HQ
   satisfies a requirement is the server's policy.

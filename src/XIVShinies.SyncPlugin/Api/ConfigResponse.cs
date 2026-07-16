@@ -41,6 +41,21 @@ public sealed record ConfigResponse
     public IReadOnlyList<ItemManifestGroup>? ItemManifestGroups { get; init; }
 
     /// <summary>
+    /// Manifest ids to OMIT from an upload when no scan source resolved a value, instead of
+    /// reporting the explicit <c>count: 0</c>. Null when the server does not send the field.
+    /// </summary>
+    /// <remarks>
+    /// The server lists its content-bound currencies here (Occult Crescent's pieces, for
+    /// example): the game only exposes their counts while the character is inside that content,
+    /// so out-of-zone their absence from every source means "not visible from here" — an
+    /// explicit zero would overwrite the real count the server already holds. Which ids behave
+    /// this way is the server's catalog knowledge; the plugin applies the set generically and
+    /// never hardcodes an id.
+    /// </remarks>
+    // NOT `required`, for the same older-server reason as ItemManifestGroups above.
+    public IReadOnlyList<uint>? ItemOmitWhenUnseenIds { get; init; }
+
+    /// <summary>
     /// Whether the server permits this category right now.
     /// </summary>
     /// <remarks>
