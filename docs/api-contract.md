@@ -109,7 +109,12 @@ read per request, so a flipped kill switch reaches the plugin on its next poll.
     "fullSyncMinutes": 30,     // full-sweep upload cadence
     "unlockDebounceSeconds": 5 // debounce after an Unlock event before uploading
   },
-  "itemManifest": [7851, 7852], // item IDs the server wants possession counts for
+  "itemManifest": [7851, 7852], // the flat manifest: proof item IDs, kept for clients without group support
+  "itemManifestGroups": [       // named consent groups; when present, these define what may be scanned
+    {"key": "relic-proofs", "label": "Relic weapons, tools & armor", "ids": [7851, 7852], "legacy": true},
+    {"key": "relic-materials", "label": "Relic materials", "ids": [5106]},
+    {"key": "relic-currencies", "label": "Currencies (including gil)", "ids": [1, 28]}
+  ],
   "manifestVersion": "a1b2c3d4e5f6"
 }
 ```
@@ -119,7 +124,17 @@ read per request, so a flipped kill switch reaches the plugin on its next poll.
   collecting/sending disabled categories. The server enforces them too, but a compliant
   client saves the round trips.
 - **Item manifest.** The item IDs the server wants possession counts for. The plugin checks
-  possession of **only** these items.
+  possession of **only** these items. When `itemManifestGroups` is present it takes
+  precedence; the flat list stays in the config permanently for clients without group
+  support, and serves proof ids only.
+- **Item manifest groups.** Named consent groups splitting the manifest: `key` is a stable
+  consent identifier (a rename is a NEW group and re-prompts consent); `label` is
+  user-facing; `legacy: true` marks a group whose scope pre-group items consent already
+  covered — the plugin's one-time migration auto-enables exactly those. Everything else
+  defaults OFF until the user opts in per group. The plugin scans the union of the enabled
+  groups, deduplicated in first-seen order (an id may legitimately appear in more than one
+  group). A config with no groups field — or an empty array — falls back to the flat
+  `itemManifest`.
 - **`manifestVersion`.** A content hash (the first 12 hex characters of the SHA-256 of the
   serialized manifest array). It changes iff the manifest changes, so the plugin can skip
   re-scanning inventory when the version it last scanned against is unchanged. Echo it back
@@ -151,7 +166,14 @@ request without it is rejected with **413**. Maximum body size is **1 MiB** by d
     "minions": [2, 8],
     "mounts": [1, 5],
     "quests": [65575, 66216], // Quest Excel row ids == the server's Quest.id
-    "items": [{"id": 7851, "count": 1, "fresh": true}]
+    "items": [{"id": 7851, "count": 1, "hqCount": 2, "fresh": true}]
+  },
+  "itemSources": { // optional — how each storage source was read this pass
+    "inventory": {"state": "live"},
+    "saddlebag": {"state": "cached"},
+    "retainers": {"state": "cached", "count": 3, "total": 5},
+    "armoire": {"state": "loaded"},
+    "glamourDresser": {"state": "unscanned"}
   }
 }
 ```
@@ -167,7 +189,8 @@ Field constraints:
 | `manifestVersion`        | optional, ≤ 100 chars                                                                     |
 | `trigger`                | `interval` \| `login` \| `manual` \| `unlock`                                            |
 | id-list categories       | arrays of positive integers, **max 50,000 ids per category**                             |
-| `items`                  | `{id: positive int, count: non-negative int, fresh: boolean}[]`, **max 10,000 entries**  |
+| `items`                  | `{id: positive int, count: non-negative int, hqCount?: positive int, collectableCount?: positive int, fresh: boolean}[]`, **max 10,000 entries** |
+| `itemSources`            | optional object keyed by source name; each value `{state: "live"\|"cached"\|"unscanned"\|"loaded", count?: int, total?: int}` |
 
 - **Unknown `collections` keys are stripped and logged, never rejected** — a plugin newer
   than the server keeps working (payload evolution is additive-only). An older plugin simply
@@ -182,6 +205,21 @@ Field constraints:
   Dropped ids are simply absent from the `written` counts.
 - An **empty array carries no facts** and writes nothing (absence and emptiness are both "no
   information").
+- **Explicit zeros.** An `items` entry PRESENT — even with `count: 0` — is a reported fact
+  for that id; an id ABSENT from the list was not scanned and carries no information. What
+  a count *means* is decided per id by which manifest group the id belongs to — see the
+  proof vs. count-tracked split under [Behavior](#behavior-the-plugin-author-should-know).
+  Uploads are filtered to the served manifest at apply time, so stale-manifest or
+  out-of-catalog ids are dropped before writing.
+- **Per-quality counts.** `count` is normal-quality copies only; optional `hqCount` and
+  `collectableCount` are omitted when zero. The plugin never sums qualities; whether HQ
+  satisfies a requirement is the server's policy.
+- **`itemSources`** tells the server which storage sources contributed to the counts (a
+  zero while retainers are unscanned is a floor, not truth) and powers "open your saddlebag
+  once" hints. The retainer entry's `count` is how many retainers the cache remembers; the
+  optional `total` is how many the character has, when the game can say — `3` of `5`
+  scanned means two retainers contribute nothing yet. Both are counts only; nothing
+  identifies an individual retainer.
 - `fresh: false` means the count came from a cache rather than a live container read. The
   server treats a stale positive as a positive (the item *was* there), so the flag does not
   change the outcome.
@@ -201,12 +239,15 @@ Field constraints:
   },
   "achievementsSkipped": "not_sent", // present iff the achievements key was absent or stripped as disabled (an explicit empty array is "sent")
   "provenSteps": 3, // present iff items were applied and relic-proof derivation succeeded
+  "itemCounts": 1268, // rows written to item-count storage by this upload's items
   "skippedCategories": ["minions"] // present iff the server stripped disabled categories from this payload
 }
 ```
 
 Optional keys are **omitted rather than null**, so the plugin can feature-detect them.
-`items` never appears in `written` (it feeds relic proofs, not a collection count).
+`items` never appears in `written` (it feeds relic proofs and count storage, not a
+collection count). `itemCounts` is informational, like `written`: the plugin ignores both —
+no plugin logic may branch on them.
 
 #### Status codes
 
@@ -259,10 +300,20 @@ Lodestone id, so it never auto-creates characters).
   acquisition time for every category in it. Snapshot uploads (`interval`/`login`/`manual`)
   stamp the upload time for achievements, minions, and mounts, and leave quests' date null.
   An existing acquisition date is **never overwritten**.
-- **Relic proofs from the item manifest.** Possession (`count > 0`) of a manifest item
-  proves that relic stage **and every lower-order stage of the same relic** (relic chains
-  are strictly sequential). Proofs are sticky: because possession is volatile (the stage-N
-  weapon is consumed by stage N+1), an item absent from a later upload changes nothing.
+- **Relic proofs from the item manifest.** Possession (`count > 0`) of a proof-scope item
+  (the `relic-proofs` group, or the flat manifest) proves that relic stage **and every
+  lower-order stage of the same relic**. Proofs are sticky: because possession is volatile
+  (the stage-N weapon is consumed by stage N+1), an item absent from a later upload changes
+  nothing.
+- **Count-tracked items.** For ids in the materials and currencies groups, the reported
+  counts are the current total, replacing the stored value — including downward, including
+  to zero. This is the one deliberate exception to grow-only semantics, and it is scoped to
+  counts: absence still never clears anything, and proof/collection flags remain monotonic.
+  GC seals are three independent count-tracked currencies (every Grand Company's balance
+  persists in the game and is reported; the website resolves which is spendable from the
+  character's Lodestone affiliation). Which currency classes the plugin can read, and
+  through which game mechanism, is recorded in [currency-coverage.md](currency-coverage.md)
+  — the reference for curating currency ids into manifest groups.
 - **Rate limits and backoff.** The default limit is 60 uploads per token per hour. Honor
   `Retry-After` on 429 and 503 and back off — do not tight-loop retries.
 - **Kill switches are server-enforced too.** A disabled category is stripped from the payload
@@ -275,41 +326,3 @@ The two sides release independently. A newer plugin's unknown payload key is str
 logged, never an error; an older plugin simply omits keys, which is safe under monotonic
 writes. Adding a collection on the plugin side is one new `ICollector` class (see the repo
 `CLAUDE.md`); the per-category toggle and payload key then appear automatically.
-
-## Agreed contract additions (2026-07-12 — server rollout pending)
-
-Both workstreams have accepted the following additions as final; the deployed server does
-not implement them yet. Until it does, everything above remains the live contract — the
-server strips the new payload keys harmlessly, and the plugin behaves exactly as before
-whenever the new config fields are absent. When the server ships them, fold each into the
-main sections above and delete this section.
-
-- **Item manifest groups.** `/config` gains `itemManifestGroups`: an array of
-  `{key, label, ids, legacy?}` objects splitting the manifest into named consent groups.
-  `key` is a stable consent identifier (a rename is a NEW group and re-prompts consent);
-  `label` is user-facing; `legacy: true` marks a group whose scope pre-group items consent
-  already covered (the plugin's one-time migration auto-enables exactly those). The plugin
-  scans the union of user-enabled groups; a config without the field falls back to the flat
-  `itemManifest`, which then serves proof ids only.
-- **Per-quality item counts.** `items` entries gain optional `hqCount` and
-  `collectableCount` (omitted when zero). `count` keeps its existing meaning —
-  normal-quality copies only. The plugin never sums qualities; whether HQ satisfies a
-  requirement is the server's policy.
-- **Explicit zeros / per-id count semantics.** An `items` entry PRESENT — even with
-  `count: 0` — is a reported fact for that id; an id ABSENT from the list was not scanned
-  and carries no information. The server decides per id what a count means: relic-proof
-  ids keep today's sticky semantics (only `count > 0` acts, a zero is inert), while
-  count-tracked ids (shopping-list materials/currencies) use the reported counts as the
-  current total — including a zero, which lowers the website's counter. This is the one
-  deliberate, agreed exception to grow-only semantics, and it is scoped to counts: absence
-  still never clears anything, and proof/collection flags remain monotonic.
-- **Per-source scan status.** The sync payload gains an optional `itemSources` object:
-  `{"inventory": {"state": "live"}, "saddlebag": {"state": "cached"|"unscanned"},
-  "retainers": {"state": "cached", "count": 3, "total": 5}, "armoire":
-  {"state": "loaded"|"unscanned"}, "glamourDresser": {"state": "cached"|"unscanned"}}`.
-  It tells the server which sources contributed to the counts (e.g. a zero while retainers
-  are unscanned is a floor, not truth) and powers "open your saddlebag once" hints. The
-  retainer entry's `count` is how many retainers the cache remembers; the optional `total`
-  is how many the character has, when the game can say — `3` of `5` scanned means two
-  retainers contribute nothing yet. Both are counts only; nothing identifies an individual
-  retainer.
