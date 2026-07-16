@@ -31,6 +31,17 @@ public class SyncPayloadBuilderTests
     }
 
     [Fact]
+    public void A_snapshot_built_without_source_notes_yields_no_item_sources()
+    {
+        // The Snapshot helper never sets SourceNotes, so this pins the property's default (an
+        // empty dictionary) flowing through Build as an omitted itemSources key.
+        var request = SyncPayloadBuilder.Build(
+            Identity, "1.0.0", SyncTrigger.Manual, Snapshot("quests"), manifestVersion: null);
+
+        Assert.Null(request.ItemSources);
+    }
+
+    [Fact]
     public void Carries_the_identity_version_and_trigger()
     {
         var request = SyncPayloadBuilder.Build(
@@ -122,5 +133,34 @@ public class SyncPayloadBuilderTests
             Identity, "1.0.0", SyncTrigger.Login, Snapshot("quests"), null);
 
         Assert.False(request.Collections.ContainsKey("achievements"));
+    }
+
+    [Fact]
+    public void Build_puts_source_notes_on_the_request_when_present()
+    {
+        var sourceNotes = new Dictionary<string, ItemSourceStatus>
+        {
+            ["inventory"] = new ItemSourceStatus { State = SourceStates.Live },
+            ["saddlebag"] = new ItemSourceStatus { State = SourceStates.Cached, Count = 3 },
+        };
+        var snapshot = Snapshot("items") with { SourceNotes = sourceNotes };
+
+        var request = SyncPayloadBuilder.Build(Identity, "1.0.0", SyncTrigger.Manual, snapshot, null);
+
+        Assert.NotNull(request.ItemSources);
+        Assert.Equal(2, request.ItemSources.Count);
+        Assert.Equal(SourceStates.Live, request.ItemSources["inventory"].State);
+        Assert.Equal(SourceStates.Cached, request.ItemSources["saddlebag"].State);
+        Assert.Equal(3, request.ItemSources["saddlebag"].Count);
+    }
+
+    [Fact]
+    public void Build_omits_item_sources_when_none_are_present()
+    {
+        var snapshot = Snapshot("items") with { SourceNotes = new Dictionary<string, ItemSourceStatus>() };
+
+        var request = SyncPayloadBuilder.Build(Identity, "1.0.0", SyncTrigger.Manual, snapshot, null);
+
+        Assert.Null(request.ItemSources);
     }
 }

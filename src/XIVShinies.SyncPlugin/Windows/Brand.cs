@@ -49,6 +49,20 @@ public static class Brand
     /// <summary>The brand teal at reduced opacity, for rules, dividers, and underlines.</summary>
     public static readonly Vector4 TealRule = new(0.05f, 0.86f, 0.77f, 0.45f);
 
+    /// <summary>
+    /// The face of a primary button that cannot be pressed: a flat, desaturated slate.
+    /// </summary>
+    /// <remarks>
+    /// A color, not a fade. ImGui's disabled state only multiplies the alpha, and the brand teal is
+    /// vivid enough that a dimmed teal still reads as a live button someone simply has to click harder.
+    /// Draining the color out of it is what says "not yet" at a glance — the button keeps its shape and
+    /// its place, and loses the thing that invited the press.
+    /// </remarks>
+    public static readonly Vector4 DisabledSurface = new(0.26f, 0.29f, 0.33f, 1f);
+
+    /// <summary>Text on <see cref="DisabledSurface"/> — legible, clearly not the live foreground.</summary>
+    public static readonly Vector4 DisabledForeground = new(0.62f, 0.65f, 0.70f, 1f);
+
     /// <summary>The "shiny" gold — sparkle and gem accents.</summary>
     public static readonly Vector4 Gold = new(0.98f, 0.77f, 0.14f, 1f);
 }

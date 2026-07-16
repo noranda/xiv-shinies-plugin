@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json.Nodes;
 using Xunit;
@@ -74,5 +75,36 @@ public class CollectResultTests
         var item = result.Facts!.AsArray()[0]!.AsObject();
         Assert.Equal(7851u, item["id"]!.GetValue<uint>());
         Assert.Equal(0u, item["count"]!.GetValue<uint>());
+    }
+
+    [Fact]
+    public void Items_with_source_notes_carries_them_alongside_the_facts()
+    {
+        var sourceNotes = new Dictionary<string, ItemSourceStatus>
+        {
+            ["inventory"] = new ItemSourceStatus { State = SourceStates.Live },
+            ["saddlebag"] = new ItemSourceStatus { State = SourceStates.Unscanned },
+        };
+        var items = new[] { new ItemPossession { Id = 7851, Count = 1, Fresh = true } };
+
+        var result = CollectResult.Items(items, sourceNotes);
+
+        Assert.True(result.WasCollected);
+        Assert.NotNull(result.Facts);
+        Assert.NotNull(result.SourceNotes);
+        Assert.Equal(2, result.SourceNotes.Count);
+        Assert.Equal(SourceStates.Live, result.SourceNotes["inventory"].State);
+        Assert.Equal(SourceStates.Unscanned, result.SourceNotes["saddlebag"].State);
+    }
+
+    [Fact]
+    public void Items_without_source_notes_has_null_source_notes()
+    {
+        var items = new[] { new ItemPossession { Id = 7851, Count = 1, Fresh = true } };
+
+        var result = CollectResult.Items(items);
+
+        Assert.True(result.WasCollected);
+        Assert.Null(result.SourceNotes);
     }
 }

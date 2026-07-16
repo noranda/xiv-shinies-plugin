@@ -10,18 +10,27 @@ using XIVShinies.SyncPlugin.Collectors;
 namespace XIVShinies.SyncPlugin.Sync;
 
 /// <summary>
-/// One category's contribution to an upload: its wire key, how many facts went out, and a short
-/// content fingerprint.
+/// One category's contribution to an upload: its wire key, how many facts went out, a short
+/// content fingerprint, and whether its scope comes from the server's item manifest.
 /// </summary>
 /// <remarks>
-/// The fingerprint exists because the count alone cannot see an exchange: trading one watched
-/// item for another leaves the count identical while the payload's contents change (a relic
-/// tool trade-in does exactly this). It is a hash of the facts, so the log still carries no
-/// ids — just enough to answer "did this category's contents change since last time?".
+/// The fingerprint exists because the count alone cannot see an exchange: swapping one fact for
+/// another leaves the count identical while the payload's contents change. It is a hash of the
+/// facts, so the log still carries no ids — just enough to answer "did this category's contents
+/// change since last time?".
+/// <para>
+/// <paramref name="UsesItemManifest"/> mirrors the collector's own
+/// <see cref="Collectors.ICollector.UsesItemManifest"/> flag. It decides the category's change
+/// signal: a manifest-driven category's contents move whenever the server edits the manifest, so
+/// a content diff cannot tell "the player obtained something" from "the manifest grew" — those
+/// categories report the server's proof answer (<see cref="UploadLogEntry.ProvenSteps"/>)
+/// instead of a "(changed)" mark.
+/// </para>
 /// </remarks>
 // A "positional record": the parameter list declares init-only properties and a constructor in
 // one line — the C# shorthand for a tiny immutable data shape.
-public sealed record UploadLogCategory(string Key, int Count, string Fingerprint = "");
+public sealed record UploadLogCategory(
+    string Key, int Count, string Fingerprint = "", bool UsesItemManifest = false);
 
 /// <summary>
 /// One upload, as shown in the settings window's upload log: when, why, what was sent, and how
@@ -92,6 +101,16 @@ public sealed record UploadLogEntry
     public string? Detail { get; init; }
 
     /// <summary>
+    /// The relic-step rows this upload created or promoted, from the response's
+    /// <c>provenSteps</c> key — the server's answer to "did these items prove anything new?".
+    /// Zero means the items were applied but nothing new was proved. Null means the server sent
+    /// no answer: on an accepted upload that sent item facts, that is derivation failing
+    /// server-side (the next upload retries it). A manifest-driven category that went out empty
+    /// carries no information — the server applies nothing — so it is never owed an answer.
+    /// </summary>
+    public int? ProvenSteps { get; init; }
+
+    /// <summary>
     /// Summarizes a collection snapshot into a draft entry, before the upload's outcome is known.
     /// Settle it once the response lands: <c>draft with { Status = response.Status, … }</c>.
     /// </summary>
@@ -103,7 +122,13 @@ public sealed record UploadLogEntry
     {
         var categories = new List<UploadLogCategory>(snapshot.Collections.Count);
         foreach (var (key, facts) in snapshot.Collections)
-            categories.Add(new UploadLogCategory(key, CountFacts(facts), Fingerprint(facts)));
+        {
+            categories.Add(new UploadLogCategory(
+                key,
+                CountFacts(facts),
+                Fingerprint(facts),
+                snapshot.ManifestDrivenKeys.Contains(key)));
+        }
 
         return new UploadLogEntry
         {
@@ -130,9 +155,9 @@ public sealed record UploadLogEntry
 
     /// <summary>
     /// A short, deterministic hash of a category's facts. Collectors build their facts in a
-    /// stable order (game sheets iterate in ascending row order; the item manifest arrives
-    /// sorted by the server's contract), so identical contents always hash identically — and any
-    /// change, even one that leaves the count the same, changes the hash.
+    /// stable order (game sheets iterate in ascending row order), so identical contents always
+    /// hash identically — and any change, even one that leaves the count the same, changes the
+    /// hash.
     /// </summary>
     /// <remarks>
     /// The stability depends on that ordering: if a source ever reordered identical facts, the
@@ -218,14 +243,16 @@ public static class UploadLogDiff
     /// <summary>
     /// The category keys in <c>newestFirst[index]</c> whose contents differ from that category's
     /// most recent earlier appearance in the log — a different count, or the same count with a
-    /// different fingerprint (one watched item traded for another, say).
+    /// different fingerprint.
     /// </summary>
     /// <remarks>
     /// The baseline is the nearest OLDER entry that mentions the category, not simply the
     /// previous entry: an unlock upload carries only the categories that changed, so in-between
     /// entries may not mention a category at all. A category the log has never seen before is
     /// not flagged — with no baseline, "changed" would be a guess, and it would paint the whole
-    /// first upload of every session.
+    /// first upload of every session. Manifest-driven categories are never flagged — their
+    /// change signal is the server's proof answer (<see cref="UploadLogEntry.ProvenSteps"/>);
+    /// <see cref="UploadLogCategory"/> explains why a content diff cannot carry it.
     /// </remarks>
     public static IReadOnlySet<string> ChangedCategories(
         IReadOnlyList<UploadLogEntry> newestFirst, int index)
@@ -234,6 +261,9 @@ public static class UploadLogDiff
 
         foreach (var category in newestFirst[index].Categories)
         {
+            if (category.UsesItemManifest)
+                continue;
+
             // `is { } baseline` is a null test and an unwrap in one: the branch runs only when a
             // baseline exists, with `baseline` as the record inside the nullable.
             if (Baseline(newestFirst, index, category.Key) is { } baseline
@@ -349,17 +379,68 @@ public static class UploadLogText
             return null;
 
         var text = string.Join(" · ", parts);
+
+        // Three periods, not the single "…" glyph — see MainWindow's Verify label for why.
         return text.Length <= UploadLogEntry.MaxServerStringLength
             ? text
-            : text[..UploadLogEntry.MaxServerStringLength] + "…";
+            : text[..UploadLogEntry.MaxServerStringLength] + "...";
     }
 
     /// <summary>
     /// True when the outcome is only a delay the plugin handles by itself (it will retry later).
-    /// The log renders these muted: they need no action, unlike refusals, which render red.
+    /// The log draws these at the normal text color: they need no action, unlike refusals, which
+    /// render red.
     /// </summary>
     public static bool IsDeferral(ApiStatus status) =>
         status is ApiStatus.RateLimited or ApiStatus.SyncDisabled or ApiStatus.NetworkError;
+
+    /// <summary>
+    /// The note the window prints beside a manifest-driven category, from the server's proof
+    /// answer — or null when there is nothing worth saying.
+    /// </summary>
+    /// <remarks>
+    /// Manifest-driven categories get no "(changed)" mark (see
+    /// <see cref="UploadLogDiff.ChangedCategories"/>); this is their signal instead. The cases:
+    /// steps were proved → say how many; zero proved → silence (the items applied, nothing new —
+    /// no note is the honest rendering); no answer on an accepted upload that sent item facts →
+    /// "proof pending", because derivation failed server-side and the next upload retries it. An
+    /// upload that was not accepted was never owed an answer, and neither was one whose
+    /// manifest-driven categories were all empty — the contract treats an empty array as "no
+    /// information", so the server applies nothing and correctly stays silent. Both return null.
+    /// </remarks>
+    public static string? ProofText(UploadLogEntry entry)
+    {
+        if (entry.Status != ApiStatus.Ok)
+            return null;
+
+        if (entry.ProvenSteps is { } steps)
+        {
+            if (steps == 0)
+                return null;
+
+            // "New" is load-bearing: the server's number is the delta this upload proved (rows
+            // created plus promoted), never a running total, and the wording must not read as one.
+            return steps == 1 ? "1 new step proven" : $"{steps} new steps proven";
+        }
+
+        return CarriesManifestDrivenFacts(entry) ? "proof pending" : null;
+    }
+
+    /// <summary>
+    /// True when the entry sent at least one fact under a manifest-driven category. The count
+    /// matters: an empty category carries no information, so the server applies nothing and owes
+    /// no proof answer for it.
+    /// </summary>
+    private static bool CarriesManifestDrivenFacts(UploadLogEntry entry)
+    {
+        foreach (var category in entry.Categories)
+        {
+            if (category.UsesItemManifest && category.Count > 0)
+                return true;
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Renders the log as plain text for the clipboard, one line per upload — what a user pastes
@@ -402,7 +483,7 @@ public static class UploadLogText
 
             // The same fact the window's gold highlight shows, in text: which categories'
             // contents differ from their previous appearance. Counts alone cannot carry this —
-            // a one-for-one item swap keeps the count identical.
+            // a one-for-one content swap keeps the count identical.
             var changed = UploadLogDiff.ChangedCategories(entries, index);
             if (changed.Count > 0)
             {
@@ -410,6 +491,16 @@ public static class UploadLogText
                 foreach (var key in changed)
                     text.Append(' ').Append(key);
             }
+
+            // The server's proof answer, verbatim — including zero, which the window stays
+            // silent about but a debugger wants to see. An accepted upload that sent item facts
+            // and got NO answer is the derivation-failed case, and "absent" is exactly the fact
+            // a pasted bug report needs. (An all-empty manifest-driven category was never owed
+            // an answer, so it gets no marker — same rule as the window's "proof pending".)
+            if (entry.ProvenSteps is { } steps)
+                text.Append(" | provenSteps: ").Append(steps);
+            else if (entry.Status == ApiStatus.Ok && CarriesManifestDrivenFacts(entry))
+                text.Append(" | provenSteps: absent");
 
             // Diagnostics, only when they say something: a clean first-try success stays a clean
             // one-liner. The raw HTTP code is skipped on Ok — it can only be 200 there.

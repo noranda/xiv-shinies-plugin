@@ -308,4 +308,126 @@ public class DtoSerializationTests
         Assert.Equal("Request body is not valid JSON", Assert.Single(error.Issues!.FormErrors!));
         Assert.Equal("Invalid enum value.", Assert.Single(error.Issues.FieldErrors!["trigger"]));
     }
+
+    [Fact]
+    public void ItemPossession_serializes_quality_counts_in_camelCase_and_round_trips()
+    {
+        var possession = new ItemPossession
+        {
+            Id = 7851,
+            Count = 5,
+            HqCount = 2,
+            CollectableCount = 1,
+            Fresh = true,
+        };
+
+        var json = JsonSerializer.Serialize(possession, ApiJson.Options);
+
+        Assert.Equal("""{"id":7851,"count":5,"hqCount":2,"collectableCount":1,"fresh":true}""", json);
+
+        // Round-trip: deserialize and verify the record equals the original
+        var deserialized = JsonSerializer.Deserialize<ItemPossession>(json, ApiJson.Options)!;
+        Assert.Equal(possession, deserialized);
+    }
+
+    [Fact]
+    public void ItemPossession_omits_quality_count_keys_when_null()
+    {
+        // The common case: most relic materials only exist in normal quality. The optional keys
+        // must be ABSENT (WhenWritingNull), not zero — absent keys cost no bytes and can never be
+        // misread as a fact by an older server.
+        var possession = new ItemPossession { Id = 7851, Count = 0, Fresh = true };
+
+        var json = JsonSerializer.Serialize(possession, ApiJson.Options);
+
+        Assert.Equal("""{"id":7851,"count":0,"fresh":true}""", json);
+    }
+
+    [Fact]
+    public void ConfigResponse_deserializes_item_manifest_groups()
+    {
+        const string json = """
+            {"categories":{"items":true},"enabled":true,
+             "intervals":{"fullSyncMinutes":30,"unlockDebounceSeconds":5},
+             "itemManifest":[7851],"manifestVersion":"abc123",
+             "itemManifestGroups":[
+               {"key":"relic-proofs","label":"Relic weapons & tools you own","ids":[7851],"legacy":true},
+               {"key":"relic-materials","label":"Relic materials","ids":[27798,24248]}]}
+            """;
+
+        var config = JsonSerializer.Deserialize<ConfigResponse>(json, ApiJson.Options)!;
+
+        Assert.NotNull(config.ItemManifestGroups);
+        Assert.Equal(2, config.ItemManifestGroups!.Count);
+        Assert.Equal("relic-proofs", config.ItemManifestGroups[0].Key);
+        Assert.Equal("Relic weapons & tools you own", config.ItemManifestGroups[0].Label);
+        Assert.True(config.ItemManifestGroups[0].Legacy);
+        Assert.Equal("relic-materials", config.ItemManifestGroups[1].Key);
+        Assert.False(config.ItemManifestGroups[1].Legacy);   // legacy defaults false when absent
+        Assert.Equal(new uint[] { 27798, 24248 }, config.ItemManifestGroups[1].Ids);
+    }
+
+    [Fact]
+    public void ConfigResponse_without_groups_leaves_them_null()
+    {
+        // A config without groups must deserialize cleanly — an older server is a supported peer,
+        // and null groups is the signal to fall back to the flat manifest.
+        const string json = """
+            {"categories":{},"enabled":true,
+             "intervals":{"fullSyncMinutes":30,"unlockDebounceSeconds":5},
+             "itemManifest":[7851],"manifestVersion":"abc123"}
+            """;
+
+        var config = JsonSerializer.Deserialize<ConfigResponse>(json, ApiJson.Options)!;
+
+        Assert.Null(config.ItemManifestGroups);
+    }
+
+    [Fact]
+    public void ItemSourceStatus_serializes_state_and_optional_counts()
+    {
+        var live = new ItemSourceStatus { State = SourceStates.Live };
+        var retainers = new ItemSourceStatus { State = SourceStates.Cached, Count = 3 };
+        var partial = new ItemSourceStatus { State = SourceStates.Cached, Count = 3, Total = 5 };
+
+        Assert.Equal("""{"state":"live"}""", JsonSerializer.Serialize(live, ApiJson.Options));
+        Assert.Equal("""{"state":"cached","count":3}""", JsonSerializer.Serialize(retainers, ApiJson.Options));
+        Assert.Equal(
+            """{"state":"cached","count":3,"total":5}""",
+            JsonSerializer.Serialize(partial, ApiJson.Options));
+    }
+
+    [Fact]
+    public void SyncRequest_with_item_sources_carries_them_under_itemSources()
+    {
+        // glamourDresser doubles as the proof that a mid-word capital in a source key reaches the
+        // wire verbatim; the state pairings mirror the contract's examples (armoire is the one
+        // source that uses "loaded").
+        var request = MinimalRequest() with
+        {
+            ItemSources = new Dictionary<string, ItemSourceStatus>
+            {
+                ["glamourDresser"] = new ItemSourceStatus { State = SourceStates.Cached },
+                ["armoire"] = new ItemSourceStatus { State = SourceStates.Loaded },
+                ["retainers"] = new ItemSourceStatus { State = SourceStates.Cached, Count = 2 },
+            },
+        };
+
+        var json = Serialize(request);
+
+        Assert.True(json.ContainsKey("itemSources"));
+        var sources = json["itemSources"]!.AsObject();
+        Assert.Equal("cached", sources["glamourDresser"]!["state"]!.GetValue<string>());
+        Assert.Equal("loaded", sources["armoire"]!["state"]!.GetValue<string>());
+        Assert.Equal("cached", sources["retainers"]!["state"]!.GetValue<string>());
+        Assert.Equal(2, sources["retainers"]!["count"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void SyncRequest_omits_itemSources_when_it_is_null()
+    {
+        var json = Serialize(MinimalRequest());
+
+        Assert.False(json.ContainsKey("itemSources"));
+    }
 }

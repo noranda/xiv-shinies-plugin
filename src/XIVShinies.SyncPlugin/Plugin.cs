@@ -125,9 +125,13 @@ public sealed class Plugin : IDalamudPlugin
         // Start listening. The manager subscribes to login and unlock events immediately, but every
         // path out of them checks the upload gate first, so a user who has not opted in sends
         // nothing and the plugin never contacts the server.
+        //
+        // `Configuration.Save` is passed as a method-group callback (see CollectorRegistry.Create
+        // for how method groups work): the manager gets "persist the settings" as a plain Action,
+        // so it never needs a reference to the Dalamud config shell itself.
         syncManager = new SyncManager(
             Framework, ClientState, PlayerState, UnlockState, Log,
-            apiClient, Configuration.Settings, collectors, version);
+            apiClient, Configuration.Settings, Configuration.Save, collectors, version);
 
         // The mascot drawn in the settings header — the same hand-made image the installer shows,
         // shipped next to the DLL. GetFromFile returns a shared texture that loads lazily and is

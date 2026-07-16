@@ -43,6 +43,45 @@ public sealed record CollectionSnapshot
     // dictionary is the honest default for "nothing was measured".
     public IReadOnlyDictionary<string, TimeSpan> Durations { get; init; } =
         new Dictionary<string, TimeSpan>();
+
+    /// <summary>
+    /// Per-source scan status (inventory live, saddlebag cached, retainers unscanned, etc.),
+    /// merged from every collector that reported source notes this pass.
+    /// </summary>
+    /// <remarks>
+    /// A dictionary (never null) because empty is meaningful: "no collector reported any source
+    /// status this pass" is a real answer, and callers can iterate it unconditionally. The merge
+    /// rules live at the merge site in <see cref="CollectorRunner.Run"/>.
+    /// </remarks>
+    // Not `required`: a snapshot assembled in a test need not care about source notes, and an empty
+    // dictionary is the honest default for "nothing was reported".
+    public IReadOnlyDictionary<string, ItemSourceStatus> SourceNotes { get; init; } =
+        new Dictionary<string, ItemSourceStatus>();
+
+    /// <summary>
+    /// The categories whose collectors declare <see cref="ICollector.UsesItemManifest"/> — their
+    /// scope is the server's item manifest rather than fixed at compile time.
+    /// </summary>
+    /// <remarks>
+    /// The upload log copies this onto each category it summarizes, where it decides the
+    /// category's change signal — <see cref="Sync.UploadLogCategory"/> holds the full reasoning.
+    /// Carried as collector self-description (the same idea as
+    /// <see cref="ICollector.DisplayName"/>) so no consumer ever compares keys against a
+    /// hardcoded name.
+    /// </remarks>
+    // Not `required`, like the fields above: an empty set is the honest default for a test
+    // snapshot that has no manifest-driven categories.
+    public IReadOnlySet<string> ManifestDrivenKeys { get; init; } = new HashSet<string>();
+
+    /// <summary>
+    /// True when this pass's item manifest was clipped at the client's ceiling (see
+    /// <see cref="CollectContext.ManifestTruncated"/>) — the server asked about more ids than
+    /// the plugin will scan. A fact about the config, not about this pass's scan: it holds even
+    /// when the pass ran no item scan at all. Carried here because the orchestrator, which holds
+    /// the logger, sees only the snapshot: the runner reports the fact, the caller decides what
+    /// to do with it.
+    /// </summary>
+    public bool ManifestTruncated { get; init; }
 }
 
 /// <summary>
@@ -68,13 +107,28 @@ public static class CollectorRunner
         var collections = new Dictionary<string, JsonNode>();
         var skipped = new Dictionary<string, string>();
         var durations = new Dictionary<string, TimeSpan>();
+        var sourceNotes = new Dictionary<string, ItemSourceStatus>();
+        var manifestDrivenKeys = new HashSet<string>();
 
         // Built once and shared: every collector sees the same view of the world for this pass.
-        var context = new CollectContext { RemoteConfig = remoteConfig };
+        // EnabledItemGroupKeys carries the user's per-group opt-ins so the item collector scans only
+        // the groups they consented to (CollectContext.ItemManifest unions the enabled groups). Taken
+        // as a snapshot, because the user can tick a group's checkbox on the UI thread while this pass
+        // is running and the live list would not survive being read and written at once.
+        var context = new CollectContext
+        {
+            RemoteConfig = remoteConfig,
+            EnabledItemGroupKeys = settings.SnapshotEnabledItemGroupKeys(),
+        };
 
         foreach (var collector in collectors)
         {
             var key = collector.CategoryKey;
+
+            // Self-description, recorded before any gating: whether a category is manifest-driven
+            // is a fact about its collector, not about whether this pass collected it.
+            if (collector.UsesItemManifest)
+                manifestDrivenKeys.Add(key);
 
             // Ask before reading: a disabled category must cost nothing, not even a game lookup.
             if (!CollectorGate.IsEnabled(key, settings, remoteConfig))
@@ -117,6 +171,18 @@ public static class CollectorRunner
                 // Note this includes an EMPTY list, which is a real fact ("I looked, there was
                 // nothing"), unlike a skip.
                 collections[key] = result.Facts!;
+
+                // Merge source notes from this collector. Source-keyed: if two collectors both report
+                // on the same source (e.g., both describe inventory), the last one wins because they
+                // describe the same physical storage location. The snapshot iteration order means
+                // "last" is the order collectors were registered.
+                if (result.SourceNotes is not null)
+                {
+                    foreach (var (sourceKey, status) in result.SourceNotes)
+                    {
+                        sourceNotes[sourceKey] = status;
+                    }
+                }
             }
             else
             {
@@ -129,6 +195,9 @@ public static class CollectorRunner
             Collections = collections,
             Skipped = skipped,
             Durations = durations,
+            SourceNotes = sourceNotes,
+            ManifestDrivenKeys = manifestDrivenKeys,
+            ManifestTruncated = context.ManifestTruncated,
         };
     }
 }

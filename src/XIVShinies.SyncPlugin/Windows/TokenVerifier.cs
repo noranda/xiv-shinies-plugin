@@ -80,7 +80,7 @@ internal sealed class TokenVerifier : IDisposable
 
         // No token passed to Task.Run: an already-cancelled one would make it skip the delegate
         // entirely, so the `finally` that clears `inFlight` would never run and the button would stay
-        // stuck on "Verifying…" forever. Cancellation is observed inside the task instead.
+        // stuck on "Checking..." forever. Cancellation is observed inside the task instead.
         _ = Task.Run(() => ProbeAsync(startedFor));
     }
 

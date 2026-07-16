@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using XIVShinies.SyncPlugin.Api;
 using XIVShinies.SyncPlugin.Collectors;
 
@@ -44,6 +45,13 @@ public static class SyncPayloadBuilder
 
             // Handed straight through. Whichever categories the collectors read, and only those.
             Collections = snapshot.Collections,
+
+            // Per-source scan status, or null when empty. An empty object on the wire is noise when
+            // no collector reported any source status; null makes the shared serializer policy
+            // (ApiJson.Options omits null properties) drop the key entirely.
+            ItemSources = snapshot.SourceNotes.Count > 0
+                ? new Dictionary<string, ItemSourceStatus>(snapshot.SourceNotes)
+                : null,
         };
     }
 }

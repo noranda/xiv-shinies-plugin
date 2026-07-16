@@ -75,6 +75,23 @@ public sealed record SyncRequest
     /// </para>
     /// </remarks>
     public required Dictionary<string, JsonNode> Collections { get; init; }
+
+    /// <summary>
+    /// Per-source scan status (inventory live, retainers cached, armoire loaded, etc.), or null when
+    /// not present. Optional on the wire: omitted when null or empty.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Accompanies item counts: it tells the server how each storage location was read, which is
+    /// what makes a low or zero count judgeable (was the saddlebag ever scanned?). Other
+    /// categories are single unlock flags with no physical storage locations to describe.
+    /// </para>
+    /// <para>
+    /// Source-keyed, never category-keyed: any collector may report on any source without special
+    /// casing by category name. A future category can use the same infrastructure.
+    /// </para>
+    /// </remarks>
+    public Dictionary<string, ItemSourceStatus>? ItemSources { get; init; }
 }
 
 /// <summary>
@@ -103,8 +120,31 @@ public sealed record ItemPossession
     // constraint in the type itself rather than relying on a runtime check.
     public required uint Id { get; init; }
 
-    /// <summary>How many are held. Zero is meaningful: it proves nothing, but it is valid.</summary>
+    /// <summary>
+    /// How many normal-quality copies are held. Zero is meaningful: it proves nothing, but it is
+    /// valid.
+    /// </summary>
     public required uint Count { get; init; }
+
+    /// <summary>
+    /// How many high-quality copies are held, or null when none — null keys are omitted from
+    /// the JSON entirely. <c>count</c> stays normal-quality only; the server
+    /// decides whether HQ satisfies a requirement. The plugin reports raw facts per quality
+    /// and never sums them.
+    /// </summary>
+    /// <remarks>
+    /// <c>uint?</c> is a nullable value type — like <c>number | null</c> in TypeScript. Plain
+    /// <c>uint</c> cannot be null, so the <c>?</c> is what makes "no HQ copies" expressible as
+    /// key-absence on the wire.
+    /// </remarks>
+    public uint? HqCount { get; init; }
+
+    /// <summary>
+    /// How many collectable-quality copies are held, or null when none. Collectables are the
+    /// same item id carrying a collectability flag (they can never also be HQ); turn-in
+    /// materials like Gobbiegoo only exist in this form.
+    /// </summary>
+    public uint? CollectableCount { get; init; }
 
     /// <summary>
     /// False when the count came from a cache rather than a live container read. The server

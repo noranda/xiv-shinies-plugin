@@ -44,18 +44,31 @@ public sealed class OnboardingState
     /// <summary>What is known about the pasted token.</summary>
     public TokenCheckState TokenCheck { get; private set; } = TokenCheckState.NotChecked;
 
+    /// <summary>
+    /// True while the wizard is still waiting to hear what the server asks about — the config fetched
+    /// on the back of a verified token.
+    /// </summary>
+    /// <remarks>
+    /// The consent step's per-group checkboxes are drawn from that config, so a user who arrived before
+    /// it did would be asked to consent to a list that is not on screen yet, and would watch the groups
+    /// appear underneath a category they had already ticked. Waiting here is what lets the consent step
+    /// promise that everything it will ever show is already showing.
+    /// </remarks>
+    public bool AwaitingConfig { get; private set; }
+
     /// <summary>True once the wizard has reached its final step.</summary>
     public bool IsComplete => Step == OnboardingStep.Done;
 
     /// <summary>Whether the user may move forward from the current step.</summary>
     /// <remarks>
-    /// Only the account step has a real precondition. Letting the user past an unverified token would
-    /// finish a wizard that cannot possibly sync, and the failure would surface much later as an
-    /// opaque 401.
+    /// Only the account step has real preconditions, and it has two. Letting the user past an
+    /// unverified token would finish a wizard that cannot possibly sync, and the failure would surface
+    /// much later as an opaque 401. Letting them past a config answer that has not arrived would put
+    /// them in front of a consent list that is still being fetched — see <see cref="AwaitingConfig"/>.
     /// </remarks>
     public bool CanAdvance => Step switch
     {
-        OnboardingStep.LinkAccount => TokenCheck == TokenCheckState.Valid,
+        OnboardingStep.LinkAccount => TokenCheck == TokenCheckState.Valid && !AwaitingConfig,
 
         // The category step imposes nothing. Every category starts off, so continuing without
         // choosing any is a coherent decision — "link my account, upload nothing yet" — and forcing a
@@ -90,6 +103,14 @@ public sealed class OnboardingState
 
     /// <summary>Records that a token probe is in flight, so the UI can show it and block advancing.</summary>
     public void BeginTokenCheck() => TokenCheck = TokenCheckState.Checking;
+
+    /// <summary>Records whether the server's config is still outstanding.</summary>
+    /// <remarks>
+    /// Pushed in by the window rather than asked for, in the same spirit as
+    /// <see cref="RecordTokenCheck"/>: the network lives out there, and this class only remembers what
+    /// it is told. That is what keeps the whole wizard testable without a server.
+    /// </remarks>
+    public void NotifyAwaitingConfig(bool awaiting) => AwaitingConfig = awaiting;
 
     /// <summary>Records what the server said about the token.</summary>
     public void RecordTokenCheck(ApiStatus status) => TokenCheck = Onboarding.TokenCheck.FromApiStatus(status);

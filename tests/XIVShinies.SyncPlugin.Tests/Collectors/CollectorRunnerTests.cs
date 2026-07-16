@@ -36,6 +36,10 @@ public class CollectorRunnerTests
 
         public string WhatGetsSent => $"Facts about {CategoryKey}.";
 
+        // The runner copies this self-description into the snapshot (the upload log uses it to
+        // pick a category's change signal); fixed-scope is the default, tests opt in per fake.
+        public bool UsesItemManifest { get; init; }
+
         public int CollectCallCount { get; private set; }
 
         public CollectContext? LastContext { get; private set; }
@@ -79,6 +83,58 @@ public class CollectorRunnerTests
         Assert.True(snapshot.Collections.ContainsKey(UnknownCategory));
         Assert.Equal(42u, snapshot.Collections[UnknownCategory].AsArray()[0]!.GetValue<uint>());
         Assert.Empty(snapshot.Skipped);
+    }
+
+    // The snapshot records which categories are manifest-driven so the upload log can pick each
+    // category's change signal without ever comparing keys against a hardcoded name.
+    [Fact]
+    public void A_manifest_driven_collectors_key_is_marked_in_the_snapshot()
+    {
+        var collector = new FakeCollector(UnknownCategory, () => CollectResult.Ids(new[] { 42u }))
+        {
+            UsesItemManifest = true,
+        };
+
+        var snapshot = CollectorRunner.Run(
+            new[] { collector }, OptedIn(UnknownCategory), RemoteConfig());
+
+        Assert.Contains(UnknownCategory, snapshot.ManifestDrivenKeys);
+    }
+
+    [Fact]
+    public void A_fixed_scope_collectors_key_is_not_marked_manifest_driven()
+    {
+        var snapshot = CollectorRunner.Run(
+            new[] { Collecting(UnknownCategory, 42) }, OptedIn(UnknownCategory), RemoteConfig());
+
+        Assert.DoesNotContain(UnknownCategory, snapshot.ManifestDrivenKeys);
+    }
+
+    // The context's truncation verdict must reach the snapshot, because the orchestrator (which
+    // holds the logger) sees only the snapshot — the runner reports the fact, the caller decides
+    // what to do with it, the same handoff the snapshot uses for durations.
+    [Fact]
+    public void The_snapshot_carries_the_manifest_truncation_verdict()
+    {
+        var oversized = new uint[CollectContext.MaxManifestItems + 1];
+        for (var i = 0; i < oversized.Length; i++)
+            oversized[i] = (uint)(i + 1);
+
+        var config = RemoteConfig() with { ItemManifest = oversized };
+
+        var snapshot = CollectorRunner.Run(
+            new[] { Collecting(UnknownCategory, 42) }, OptedIn(UnknownCategory), config);
+
+        Assert.True(snapshot.ManifestTruncated);
+    }
+
+    [Fact]
+    public void The_snapshot_reports_no_truncation_for_a_sane_manifest()
+    {
+        var snapshot = CollectorRunner.Run(
+            new[] { Collecting(UnknownCategory, 42) }, OptedIn(UnknownCategory), RemoteConfig());
+
+        Assert.False(snapshot.ManifestTruncated);
     }
 
     [Fact]
@@ -314,5 +370,94 @@ public class CollectorRunnerTests
 
         Assert.NotNull(snapshot.Durations);
         Assert.Empty(snapshot.Durations);
+    }
+
+    [Fact]
+    public void Run_merges_source_notes_into_the_snapshot()
+    {
+        var sourceNotes = new Dictionary<string, ItemSourceStatus>
+        {
+            ["inventory"] = new ItemSourceStatus { State = SourceStates.Live },
+            ["saddlebag"] = new ItemSourceStatus { State = SourceStates.Unscanned },
+        };
+        var collector = new FakeCollector(
+            "items", () => CollectResult.Items(
+                new[] { new ItemPossession { Id = 7851, Count = 1, Fresh = true } },
+                sourceNotes));
+
+        var snapshot = CollectorRunner.Run(new[] { collector }, OptedIn("items"), RemoteConfig());
+
+        Assert.NotNull(snapshot.SourceNotes);
+        Assert.Equal(2, snapshot.SourceNotes.Count);
+        Assert.Equal(SourceStates.Live, snapshot.SourceNotes["inventory"].State);
+        Assert.Equal(SourceStates.Unscanned, snapshot.SourceNotes["saddlebag"].State);
+    }
+
+    [Fact]
+    public void Run_collects_empty_source_notes_when_no_collector_reports_them()
+    {
+        var collector = Collecting(UnknownCategory, 42);
+
+        var snapshot = CollectorRunner.Run(new[] { collector }, OptedIn(UnknownCategory), RemoteConfig());
+
+        Assert.NotNull(snapshot.SourceNotes);
+        Assert.Empty(snapshot.SourceNotes);
+    }
+
+    [Fact]
+    public void Run_ignores_a_skipped_collector_when_merging_source_notes()
+    {
+        // A skip carries no source notes (a collector that could not read its source has nothing
+        // to say about any storage location), so the snapshot holds only the collected results'
+        // notes. This pins the merge to the collected branch of the runner.
+        var notes = new Dictionary<string, ItemSourceStatus>
+        {
+            ["inventory"] = new ItemSourceStatus { State = SourceStates.Live },
+        };
+        var skipping = new FakeCollector("mounts", () => CollectResult.Skipped("sheet_unavailable"));
+        var collecting = new FakeCollector(
+            "items", () => CollectResult.Items(
+                new[] { new ItemPossession { Id = 7851, Count = 1, Fresh = true } },
+                notes));
+
+        var snapshot = CollectorRunner.Run(
+            new ICollector[] { skipping, collecting }, OptedIn("mounts", "items"), RemoteConfig());
+
+        Assert.Single(snapshot.SourceNotes);
+        Assert.Equal(SourceStates.Live, snapshot.SourceNotes["inventory"].State);
+    }
+
+    [Fact]
+    public void Run_merges_multiple_collectors_source_notes_with_last_one_winning()
+    {
+        var notes1 = new Dictionary<string, ItemSourceStatus>
+        {
+            ["inventory"] = new ItemSourceStatus { State = SourceStates.Live },
+        };
+        var notes2 = new Dictionary<string, ItemSourceStatus>
+        {
+            ["inventory"] = new ItemSourceStatus { State = SourceStates.Cached },
+            ["saddlebag"] = new ItemSourceStatus { State = SourceStates.Unscanned },
+        };
+
+        var collector1 = new FakeCollector(
+            "achievements", () => CollectResult.Ids(new uint[] { 1 }));
+        var collector2 = new FakeCollector(
+            "items", () => CollectResult.Items(
+                new[] { new ItemPossession { Id = 7851, Count = 1, Fresh = true } },
+                notes1));
+        var collector3 = new FakeCollector(
+            "mounts", () => CollectResult.Items(
+                new[] { new ItemPossession { Id = 7851, Count = 1, Fresh = true } },
+                notes2));
+
+        var snapshot = CollectorRunner.Run(
+            new ICollector[] { collector1, collector2, collector3 },
+            OptedIn("achievements", "items", "mounts"),
+            RemoteConfig());
+
+        // collector3's notes2 should have overwritten inventory state from collector2
+        Assert.Equal(SourceStates.Cached, snapshot.SourceNotes["inventory"].State);
+        Assert.Equal(SourceStates.Unscanned, snapshot.SourceNotes["saddlebag"].State);
     }
 }

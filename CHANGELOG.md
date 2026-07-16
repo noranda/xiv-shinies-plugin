@@ -7,6 +7,16 @@ as the GitHub release notes for that version: the release workflow copies the to
 verbatim into the release it publishes. Sections are added by the release flow (see
 `.claude/skills/releasing/`), one per release, immediately under this line.
 
+## v0.2.0 — 2026-07-15
+
+- Sync your relic materials and currency balances (gil included) — the website's forge tray now fills and updates itself as you gather and spend
+- Choose exactly which item groups to share: relic gear, materials, and currencies each get their own consent checkbox, and newly offered groups arrive switched off with a New badge
+- The upload log reports relic steps the server actually proved ("2 new steps proven") instead of guessing from count changes
+- A new "Reading from" panel shows what each sync could read, and names the container to open once when something can't be
+- Item counts track high-quality and collectable copies separately
+- The item scan is around ten times faster
+- The upload log is now per character — it clears on logout
+
 ## v0.1.0 — 2026-07-11
 
 - First release: your FFXIV collections sync to xiv-shinies.com automatically

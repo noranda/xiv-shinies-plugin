@@ -25,6 +25,10 @@ public class CollectorSelectionTests
 
         public string WhatGetsSent => $"Facts about {CategoryKey}.";
 
+        // Selection logic does not care about item-manifest grouping, so the fake reports the same
+        // fixed-scope default every real non-items collector does.
+        public bool UsesItemManifest => false;
+
         public CollectResult Collect(CollectContext context) => CollectResult.Ids(new uint[] {1});
     }
 

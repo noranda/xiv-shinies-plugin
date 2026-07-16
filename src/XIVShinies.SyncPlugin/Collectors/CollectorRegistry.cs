@@ -52,13 +52,28 @@ public static class CollectorRegistry
         Key = CategoryKeys.Items,
         DisplayName = "Relic items",
 
-        // Says plainly that the search covers the character's own storage, retainers included. Only
-        // the counts of the items XIV Shinies named ever leave the machine, but a disclosure that
-        // omitted where the plugin looks would be technically true and practically misleading.
+        // Says plainly that the search covers the character's own storage, retainers included, and
+        // that a zero count is still a reported fact, not silence. Only the counts of the items XIV
+        // Shinies named ever leave the machine, but a disclosure that omitted where the plugin looks
+        // — or that "none of this item" is itself sent — would be technically true and practically
+        // misleading. Also names the per-group choice now that item consent is granted per manifest
+        // group rather than as one all-or-nothing switch.
+        //
+        // Currency balances get their own sentence, with gil named outright: a balance is wealth
+        // data, and "items" alone would not tell a reader that consenting to a currency group sends
+        // how much gil they hold. Phrased conditionally ("when XIV Shinies asks") because whether
+        // any currency is asked about is the server's manifest choice, group-gated like everything
+        // else — the sentence is true both before and after such a group exists.
         WhatGetsSent =
-            "Counts of the specific items XIV Shinies asks about, to prove relic progress — checked " +
-            "across your inventory, armoire, glamour dresser, saddlebag, and retainers. Nothing " +
-            "else is sent.",
+            "Counts of the specific items XIV Shinies asks about — including that you have none of " +
+            "an item — checked across your inventory, Armoire, Glamour Dresser, Saddlebag, and " +
+            "retainers. When XIV Shinies asks about currencies, your balances (gil included) are " +
+            "sent the same way. You choose which groups to share when XIV Shinies offers them. " +
+            "Nothing else is sent.",
+
+        // The only collection whose scope comes from the server's item manifest rather than being
+        // fixed at compile time, so it is the one that gets per-group consent rows in settings.
+        UsesItemManifest = true,
     };
 
     /// <summary>Creates every collector, in the order they will be run.</summary>

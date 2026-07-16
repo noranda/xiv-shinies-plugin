@@ -32,4 +32,18 @@ public sealed record CategoryInfo
     /// something new.
     /// </remarks>
     public required string WhatGetsSent { get; init; }
+
+    /// <summary>
+    /// True when this collection's scope is driven by the server's item manifest, rather than being
+    /// fixed at compile time (as quests, mounts, minions, and achievements are).
+    /// </summary>
+    /// <remarks>
+    /// This is <b>self-description, not a category-name branch</b>: the settings window asks a
+    /// collector "do you want group rows?" through this flag instead of asking "are you the items
+    /// collector?" by comparing keys. A future manifest-driven collection sets this to true on its own
+    /// <see cref="CategoryInfo"/> and gets the same group-row treatment automatically — nothing
+    /// downstream needs to learn its name. Defaults to <c>false</c>, matching every existing
+    /// fixed-scope collection.
+    /// </remarks>
+    public bool UsesItemManifest { get; init; }
 }

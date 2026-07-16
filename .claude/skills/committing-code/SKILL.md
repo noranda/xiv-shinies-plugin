@@ -87,6 +87,7 @@ type(scope): short description
 - Use conventional commit types: `feat`, `fix`, `chore`, `refactor`, `docs`, `test`, `style`, `perf`, `ci`, `build`
 - Short description on the first line (max 72 chars)
 - **Every bullet must be a single line ≤ 100 characters.** No wrapping or continuation lines — shorten the text instead
+- **Every bullet starts with a capital letter and states ONE standalone change.** A bullet must read complete on its own — never a continuation, qualifier, or elaboration of the bullet above it
 - Body is a bullet list of concise changes — one bullet per logical change, max ~10 bullets
 - **Bullets describe user-visible behavior at the highest level that's still accurate** — not internal refactors, helper extractions, file moves, or new abstractions. If a feature has never shipped, intermediate restructuring done en route is invisible to the reader and belongs in the diff, not the message. Ask: "would a teammate reading the changelog care about this bullet, or only someone reviewing the diff?" If only the latter, drop it.
 - **NEVER write paragraph/prose in the body** — bullets only

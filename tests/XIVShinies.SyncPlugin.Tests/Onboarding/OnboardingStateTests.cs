@@ -69,6 +69,48 @@ public class OnboardingStateTests
         Assert.True(state.CanAdvance);
     }
 
+    // The account step's second precondition. The next step asks the user to consent to the collections
+    // the server offers, and the per-group checkboxes within them come from a config fetched on the back
+    // of the verified token. Arriving before that answer means being asked to consent to a list that is
+    // still loading — and watching group checkboxes appear beneath a category already ticked.
+    [Fact]
+    public void The_account_step_cannot_be_left_while_the_server_config_is_still_outstanding()
+    {
+        var state = new OnboardingState();
+        state.Advance();
+
+        state.RecordTokenCheck(ApiStatus.Ok);
+        state.NotifyAwaitingConfig(true);
+
+        Assert.False(state.CanAdvance);
+
+        state.NotifyAwaitingConfig(false);
+        Assert.True(state.CanAdvance);
+    }
+
+    // The wait is a precondition of the account step alone. It can never hold up a step that was not
+    // waiting on the server in the first place — including the consent step it exists to protect, which
+    // by then has what it was waiting for.
+    //
+    // (Whether the wait ends on a FAILED poll as well as a successful one is SyncManager's contract, not
+    // this class's: it lowers the flag on any answer at all. That is a live-HTTP surface, verified by
+    // in-game QA.)
+    [Theory]
+    [InlineData(OnboardingStep.Welcome)]
+    [InlineData(OnboardingStep.ChooseCategories)]
+    public void The_config_wait_does_not_hold_up_any_other_step(OnboardingStep step)
+    {
+        var state = new OnboardingState();
+        state.RecordTokenCheck(ApiStatus.Ok);
+
+        while (state.Step != step)
+            state.Advance();
+
+        state.NotifyAwaitingConfig(true);
+
+        Assert.True(state.CanAdvance);
+    }
+
     // `Advance()` is `Step++` on an enum, guarded only by CanAdvance's `_ => false` arm. If that guard
     // were ever loosened, Step would walk past Done into an undefined value and IsComplete would
     // silently start returning false.
