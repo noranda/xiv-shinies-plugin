@@ -710,11 +710,43 @@ internal static class Widgets
     }
 
     /// <summary>
+    /// The exact width one chip will occupy, without drawing it. This is what lets a caller laying
+    /// several chips side by side decide whether the next one still fits before its row's right
+    /// edge — the wrap decision has to happen BEFORE <see cref="DrawChip"/> is called, because a
+    /// drawn chip has already reserved its footprint.
+    /// </summary>
+    /// <param name="iconFont">The caller's icon font.</param>
+    /// <param name="icon">The glyph the chip would draw before its text.</param>
+    /// <param name="text">The chip's label.</param>
+    internal static float ChipWidth(IFontHandle iconFont, FontAwesomeIcon icon, string text) =>
+        MeasureChip(iconFont, icon, text).ChipSize.X;
+
+    /// <summary>
+    /// Shows a hover tooltip with wrapped text. Call immediately after the hovered item, inside an
+    /// <c>ImGui.IsItemHovered()</c> check — a tooltip is redrawn every frame it is visible, like
+    /// every other ImGui widget, so there is nothing to open or close across frames.
+    /// </summary>
+    /// <remarks>
+    /// The wrap width is a fixed multiple of the font size rather than of any window: a tooltip
+    /// floats free of the layout that spawned it, so without an explicit wrap edge a long sentence
+    /// would stretch into one very wide line.
+    /// </remarks>
+    /// <param name="text">The tooltip's content, wrapped to a readable width.</param>
+    internal static void DrawTooltip(string text)
+    {
+        ImGui.BeginTooltip();
+        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 24f);
+        ImGui.TextUnformatted(text);
+        ImGui.PopTextWrapPos();
+        ImGui.EndTooltip();
+    }
+
+    /// <summary>
     /// A small outlined "chip": an icon then a label, both shrunk (the icon further than the text),
     /// inside a thin rounded rectangle, vertically centered against the standard checkbox row and
     /// flowing in-line at the current cursor position. Used for the "New" badge beside a freshly
-    /// added consent group. The icon is a parameter, so any caller can reuse the same compact-tag
-    /// look with a glyph of its own.
+    /// added consent group and for the read-status panel's per-source chips. The icon is a
+    /// parameter, so any caller can reuse the same compact-tag look with a glyph of its own.
     /// </summary>
     /// <remarks>
     /// ImGui has no built-in chip/pill widget, so this is built from primitives, the same way
@@ -723,7 +755,9 @@ internal static class Widgets
     /// shapes attached to the window, distinct from the layout cursor React-style widgets normally
     /// advance. Draw-list calls never move the layout cursor themselves, so a trailing <c>Dummy</c>
     /// reserves the same footprint by hand; without it, whatever is drawn next would land on top of
-    /// the chip instead of after it.
+    /// the chip instead of after it. That <c>Dummy</c> is also a real (if inert) item, which is what
+    /// lets a caller attach hover behavior — <c>ImGui.IsItemHovered()</c> right after this call
+    /// answers for the chip's reserved rectangle.
     /// </remarks>
     /// <param name="iconFont">The caller's icon font.</param>
     /// <param name="icon">The glyph drawn before the text, at a smaller scale than the text.</param>

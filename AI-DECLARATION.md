@@ -7,7 +7,7 @@ processes:
   testing: copilot
   documentation: copilot
   review: assist
-  deployment: none
+  deployment: copilot
 components:
   src/: copilot
   tests/: copilot
@@ -61,8 +61,9 @@ development honest and safe here:
 - **review: assist** — I am the final reviewer of all changes (central to the learning
   goal); the AI assists with review passes but does not have the final say.
 - **deployment: copilot** — The AI authored the release automation (the tag-triggered
-  GitHub Actions workflow that packages and publishes releases, and the gated release
-  process it enforces), with me reviewing and approving. Every release itself is
+  GitHub Actions workflow that packages and publishes releases, the Discord release
+  announcement that follows it, and the gated release process it enforces), with me
+  reviewing and approving. Every release itself is
   human-driven: I approve the changelog and version bump, merge the release PR, and push
   the tag; CI only verifies and publishes what I approved. Nothing releases without my
   explicit action.

@@ -7,6 +7,14 @@ as the GitHub release notes for that version: the release workflow copies the to
 verbatim into the release it publishes. Sections are added by the release flow (see
 `.claude/skills/releasing/`), one per release, immediately under this line.
 
+## v0.3.0 — 2026-07-16
+
+- Gear stored in the glamour dresser as part of an outfit now counts toward your relic proofs
+- Occult Crescent's currencies no longer reset to zero when you sync from outside the zone
+- The "Reading from" panel shows healthy sources as compact chips, with details on hover
+- Currencies appear in the "Reading from" panel as their own source
+- New plugin releases are announced automatically in the XIV Shinies Discord
+
 ## v0.2.0 — 2026-07-15
 
 - Sync your relic materials and currency balances (gil included) — the website's forge tray now fills and updates itself as you gather and spend

@@ -12,7 +12,11 @@ publishing to CI. Both phases are invoked via `/releasing`; the skill detects wh
 pending from repo state. **The release artifact is never built or published from a developer
 machine** — a pushed `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which builds from
 the tagged commit, verifies every version surface agrees, and publishes the GitHub Release
-that `repo.json` points at.
+that `repo.json` points at, then announces it in the Discord **#releases** channel as its
+final step — the Release notes become the embed, and any images committed under
+`images/releases/vX.Y.Z/` are attached as screenshots. (The announcement lives inside
+`release.yml` because GitHub suppresses workflow triggers for events created with the
+built-in `GITHUB_TOKEN` — a separate `release: published` workflow would never fire.)
 
 **Phase A — Changelog**: draft the player-facing `CHANGELOG.md` section for the new version,
 commit it on a release branch via `/committing-code`. Stop for review.
@@ -76,13 +80,14 @@ digraph release_flow {
         b_gates [label="B1. dotnet build + test green" shape=box];
         b_edit [label="B2. Bump <Version>,\nupdate repo.json" shape=box];
         b_verify [label="B3. Release build; packaged manifest\nAssemblyVersion == X.Y.Z.0" shape=box];
-        b_commit [label="B4. Stage + /committing-code" shape=box style=bold];
-        b_pr [label="B5. /opening-pull-requests\nwith post-merge checklist" shape=box style=bold];
-        b_stop [label="B6. STOP — user merges" shape=box];
+        b_shots [label="B4. Screenshots for Discord\n(optional) images/releases/vX.Y.Z/" shape=box];
+        b_commit [label="B5. Stage + /committing-code" shape=box style=bold];
+        b_pr [label="B6. /opening-pull-requests\nwith post-merge checklist" shape=box style=bold];
+        b_stop [label="B7. STOP — user merges" shape=box];
     }
 
     tag [label="Post-merge: pull main,\ntag vX.Y.Z, push tag" shape=box];
-    ci [label="release.yml verifies + publishes" shape=oval];
+    ci [label="release.yml verifies + publishes;\nDiscord announcement posts" shape=oval];
 
     invoke -> preflight -> detect;
     detect -> a_gates [label="equal: A pending"];
@@ -90,7 +95,7 @@ digraph release_flow {
     a_gates -> a_draft -> a_approve;
     a_approve -> a_branch [label="yes"];
     a_branch -> a_commit -> a_stop;
-    b_gates -> b_edit -> b_verify -> b_commit -> b_pr -> b_stop;
+    b_gates -> b_edit -> b_verify -> b_shots -> b_commit -> b_pr -> b_stop;
     b_stop -> tag [label="user merges"];
     tag -> ci;
 }
@@ -148,10 +153,17 @@ digraph release_flow {
 3. `dotnet build --configuration Release -warnaserror`, then verify before anything ships:
    the packaged manifest's `AssemblyVersion` equals `X.Y.Z.0`, and
    `bin/Release/XIVShinies.SyncPlugin/latest.zip` exists. Run `dotnet test` too.
-4. Stage the csproj + repo.json (+ README, first release only: remove the pre-release
+4. **Screenshots for the Discord announcement (optional).** If this release should be
+   announced with images, ask the user for them and commit them as
+   `images/releases/vX.Y.Z/*.png` in this same PR — the announcement posts from the tagged
+   commit's checkout, so only screenshots committed before the tag exists get attached. They
+   post in filename order (numeric-aware, so `1-`, `2-`, … `10-` orders naturally); at
+   most **10** are attached — extras are dropped with only a CI-log warning, so keep the
+   folder to ten or fewer. No folder means a text-only announcement, which is fine.
+5. Stage the csproj + repo.json (+ README, first release only: remove the pre-release
    caveats — the status blockquote near the top and the "(once released)" qualifier on the
    install heading) and invoke `/committing-code` (suggested: `chore(release): vX.Y.Z`).
-5. Invoke `/opening-pull-requests`. Title `chore(release): vX.Y.Z`; body must carry the
+6. Invoke `/opening-pull-requests`. Title `chore(release): vX.Y.Z`; body must carry the
    changelog bullets (they double as reviewer-facing release notes) and this post-merge
    checklist:
 
@@ -162,9 +174,10 @@ digraph release_flow {
    - [ ] `git tag vX.Y.Z && git push origin vX.Y.Z`
    - [ ] Watch the Release workflow publish the GitHub Release with XIVShinies.SyncPlugin.zip
    - [ ] Verify raw repo.json serves the new AssemblyVersion and the asset URL returns 200
+   - [ ] Watch the release run's Discord step announce the release in #releases
    - [ ] In-game: the custom-repo install/update works via /xlplugins
    ```
-6. **Stop.** The user reviews CI and merges.
+7. **Stop.** The user reviews CI and merges.
 
 ### Post-merge — tag and hand off to CI
 

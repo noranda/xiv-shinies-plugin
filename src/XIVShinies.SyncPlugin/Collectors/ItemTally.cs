@@ -48,7 +48,12 @@ public readonly record struct ItemTally(uint Nq, uint Hq, uint Collectable)
 /// </para>
 /// <para>
 /// This method emits an entry for every valid manifest id (skipping zero and duplicates),
-/// unconditionally.
+/// with one exception: an id in the server's omit-when-unseen set that NO source resolved is
+/// left out entirely. Those ids are the content-bound currencies (see
+/// <see cref="Api.ConfigResponse.ItemOmitWhenUnseenIds"/>): the game only exposes their
+/// counts inside their content, so out-of-zone their absence means "not visible from here"
+/// rather than "owns none" — and per the explicit-zero rule, the honest report for
+/// no-information is no entry.
 /// </para>
 /// </remarks>
 public static class ItemTallies
@@ -64,6 +69,11 @@ public static class ItemTallies
     /// — may be stale, and any contribution here marks the entry not fresh. Missing entries
     /// are treated as empty tallies.
     /// </param>
+    /// <param name="omitWhenUnseen">
+    /// The server's omit-when-unseen id set. An id in it that appears in NEITHER tally gets no
+    /// entry instead of the explicit zero; an id either tally resolved — any count, from any
+    /// source — reports normally. Null (an older server, or none configured) omits nothing.
+    /// </param>
     /// <returns>
     /// A list of possessions in manifest order, one per valid manifest id. Every entry is
     /// fresh if the cache contributed nothing to it; stale if the cache contributed any
@@ -77,7 +87,8 @@ public static class ItemTallies
     public static IReadOnlyList<ItemPossession> BuildPossessions(
         IReadOnlyList<uint> manifest,
         IReadOnlyDictionary<uint, ItemTally> live,
-        IReadOnlyDictionary<uint, ItemTally> cached)
+        IReadOnlyDictionary<uint, ItemTally> cached,
+        IReadOnlySet<uint>? omitWhenUnseen = null)
     {
         // Pre-sized to the manifest length — the common case is every id valid and unique.
         var result = new List<ItemPossession>(manifest.Count);
@@ -90,8 +101,17 @@ public static class ItemTallies
                 continue;
 
             // Look up both sources, defaulting to empty tallies if not found.
-            live.TryGetValue(id, out var liveTally);
-            cached.TryGetValue(id, out var cachedTally);
+            // "Resolved" is PRESENCE in a tally, not a nonzero count: the sources only record
+            // ids they actually saw, so TryGetValue answering false on both means no source
+            // laid eyes on this id at all this pass.
+            var liveResolved = live.TryGetValue(id, out var liveTally);
+            var cachedResolved = cached.TryGetValue(id, out var cachedTally);
+
+            // The omit-when-unseen exception (see the class remarks): for a content-bound
+            // currency the game is not currently exposing, silence is the honest report — an
+            // explicit zero would overwrite the real count the server already holds.
+            if (!liveResolved && !cachedResolved && omitWhenUnseen?.Contains(id) == true)
+                continue;
 
             // Combine live and cached counts quality by quality.
             var total = liveTally.Add(cachedTally);

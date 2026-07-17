@@ -30,6 +30,76 @@ public class ItemTallyTests
         Assert.True(entry.Fresh);              // the live scan ran; caches only ever ADD to a count
     }
 
+    // The omit-when-unseen rule: the server lists the ids (content-bound currencies — see
+    // docs/api-contract.md) whose absence from every scan source means "not visible from
+    // here", never "you own 0" — the game only exposes them while the character is inside
+    // their content. For those ids an ABSENT entry is the honest report; an explicit zero
+    // would overwrite the real count the server already holds.
+    [Fact]
+    public void An_unseen_omit_listed_id_gets_no_entry_instead_of_an_explicit_zero()
+    {
+        var result = ItemTallies.BuildPossessions(
+            manifest: new uint[] { 45043, 42 },
+            live: new Dictionary<uint, ItemTally>(),
+            cached: new Dictionary<uint, ItemTally>(),
+            omitWhenUnseen: new HashSet<uint> { 45043 });
+
+        // The ordinary id keeps its explicit zero; the omit-listed one is absent entirely.
+        var entry = Assert.Single(result);
+        Assert.Equal(42u, entry.Id);
+        Assert.Equal(0u, entry.Count);
+    }
+
+    // "Unseen" means no source resolved the id at all. A value from any source — here the
+    // live pass, which is what an in-zone scan produces for a content-bound currency — is a
+    // real reading and reports exactly like any other id's.
+    [Fact]
+    public void An_omit_listed_id_resolved_live_is_reported_normally()
+    {
+        var live = new Dictionary<uint, ItemTally> { [45043] = new(Nq: 120, Hq: 0, Collectable: 0) };
+
+        var entry = Assert.Single(ItemTallies.BuildPossessions(
+            manifest: new uint[] { 45043 },
+            live: live,
+            cached: new Dictionary<uint, ItemTally>(),
+            omitWhenUnseen: new HashSet<uint> { 45043 }));
+
+        Assert.Equal(120u, entry.Count);
+        Assert.True(entry.Fresh);
+    }
+
+    // "Resolved" is PRESENCE in a tally, not a nonzero count: a source that positively
+    // reported a zero has seen the id, so its reading must ship. Omission keys on absence
+    // from every source, never on a zero total — those are different rules.
+    [Fact]
+    public void An_omit_listed_id_present_with_a_zero_tally_still_ships_its_zero()
+    {
+        var live = new Dictionary<uint, ItemTally> { [45043] = new(Nq: 0, Hq: 0, Collectable: 0) };
+
+        var entry = Assert.Single(ItemTallies.BuildPossessions(
+            manifest: new uint[] { 45043 },
+            live: live,
+            cached: new Dictionary<uint, ItemTally>(),
+            omitWhenUnseen: new HashSet<uint> { 45043 }));
+
+        Assert.Equal(0u, entry.Count);
+    }
+
+    [Fact]
+    public void An_omit_listed_id_resolved_from_cache_is_reported_normally()
+    {
+        var cached = new Dictionary<uint, ItemTally> { [45043] = new(Nq: 7, Hq: 0, Collectable: 0) };
+
+        var entry = Assert.Single(ItemTallies.BuildPossessions(
+            manifest: new uint[] { 45043 },
+            live: new Dictionary<uint, ItemTally>(),
+            cached: cached,
+            omitWhenUnseen: new HashSet<uint> { 45043 }));
+
+        Assert.Equal(7u, entry.Count);
+        Assert.False(entry.Fresh);
+    }
+
     [Fact]
     public void Live_and_cached_counts_sum_and_a_cache_contribution_marks_the_entry_stale()
     {

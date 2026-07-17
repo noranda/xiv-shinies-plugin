@@ -1,5 +1,5 @@
 # Release: turns a pushed version tag (v1.2.3) into a published GitHub Release carrying the
-# DalamudPackager zip that repo.json points at.
+# DalamudPackager zip that repo.json points at, then announces it in Discord.
 #
 # Division of labor (deliberate, and different from many plugin repos): this workflow NEVER
 # writes to the repository. The release PR — authored by the /releasing skill — already bumped
@@ -124,3 +124,30 @@ jobs:
             --title "XIV Shinies Sync $env:GITHUB_REF_NAME" `
             --notes-file "$env:RUNNER_TEMP/release-notes.md" `
             --verify-tag
+
+      # Announce the release in the shared Discord #releases channel, attaching any
+      # screenshots committed under images/releases/<tag>/. This lives INSIDE the release
+      # job rather than in a `release: published`-triggered workflow because GitHub
+      # deliberately suppresses workflow triggers for events created with the built-in
+      # GITHUB_TOKEN (the anti-recursion rule) — a separate workflow would simply never
+      # run for the Release published above.
+      #
+      # The release's fields are read back from the GitHub API and cross into the Node
+      # script as environment variables — the body is arbitrary changelog markdown and
+      # must never be interpolated into script text. continue-on-error: the Release is
+      # already published by this point, so a Discord outage must not paint the whole
+      # release run failed (and a re-run would fail earlier anyway, at the already-exists
+      # release); the step's own log still carries the error.
+      - name: Announce the release on Discord
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISCORD_RELEASES_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASES_WEBHOOK_URL }}
+        run: |
+          $release = gh release view $env:GITHUB_REF_NAME --json name,body,url,publishedAt | ConvertFrom-Json
+          $env:RELEASE_NAME = $release.name
+          $env:RELEASE_BODY = $release.body
+          $env:RELEASE_URL = $release.url
+          $env:RELEASE_TAG = $env:GITHUB_REF_NAME
+          $env:RELEASE_PUBLISHED_AT = $release.publishedAt
+          node .github/scripts/post-discord-release.mjs

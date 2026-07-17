@@ -25,7 +25,7 @@
       <Version> is the plugin's release version. The Dalamud SDK copies it into the packaged
       manifest as "AssemblyVersion" (seen as "0.0.1.0" once normalized to four parts).
     -->
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
 
     <!--
       <PackageProjectUrl> is the standard .NET "project URL" property. We set it for good

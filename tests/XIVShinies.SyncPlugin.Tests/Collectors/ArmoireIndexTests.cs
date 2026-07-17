@@ -4,8 +4,8 @@ using XIVShinies.SyncPlugin.Collectors;
 
 namespace XIVShinies.SyncPlugin.Tests.Collectors;
 
-// The armoire lookup is the only pure part of item collection, so it is the only part unit-tested.
-// Reading the game's containers is verified by in-game QA.
+// The armoire lookup is one of the pure parts of item collection (alongside MirageSetIndex and
+// ItemTallies), so it is unit-tested here. Reading the game's containers is verified by in-game QA.
 public class ArmoireIndexTests
 {
     [Fact]

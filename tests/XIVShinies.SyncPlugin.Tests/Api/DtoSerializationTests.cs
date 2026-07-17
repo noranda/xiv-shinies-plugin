@@ -208,6 +208,25 @@ public class DtoSerializationTests
         Assert.Equal(5, config.Intervals.UnlockDebounceSeconds);
         Assert.Equal(new uint[] { 7851, 7852 }, config.ItemManifest);
         Assert.Equal("a1b2c3d4e5f6", config.ManifestVersion);
+
+        // Optional keys an older server never sends stay null — the omit-when-unseen set is
+        // one of them, and null must read as "omit nothing" downstream.
+        Assert.Null(config.ItemOmitWhenUnseenIds);
+    }
+
+    [Fact]
+    public void ConfigResponse_deserializes_the_omit_when_unseen_ids()
+    {
+        const string json = """
+            {"categories":{"items":true},"enabled":true,
+             "intervals":{"fullSyncMinutes":30,"unlockDebounceSeconds":5},
+             "itemManifest":[45043,45044,7851],"manifestVersion":"abc123",
+             "itemOmitWhenUnseenIds":[45043,45044]}
+            """;
+
+        var config = JsonSerializer.Deserialize<ConfigResponse>(json, ApiJson.Options)!;
+
+        Assert.Equal(new uint[] { 45043, 45044 }, config.ItemOmitWhenUnseenIds);
     }
 
     // A switch the server has never heard of reads as enabled, so a new collector works before the
