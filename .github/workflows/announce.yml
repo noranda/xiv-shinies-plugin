@@ -1,0 +1,54 @@
+# Announce: manually posts an already-published GitHub Release to the Discord #releases
+# channel. The release workflow announces automatically as its final step; this workflow is
+# the recovery path when that step failed (a webhook outage, a payload bug) — the release
+# itself is immutable and fine, only the announcement needs re-running, and re-running the
+# whole release job would fail at the already-existing Release.
+#
+# Trigger it from the Actions tab (or `gh workflow run announce.yml -f tag=vX.Y.Z`) with the
+# tag of the Release to announce. Posting is idempotent only in the sense that Discord shows
+# one message per run — dispatching twice posts twice, so check #releases first.
+name: Announce
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to announce (e.g. v0.3.0)"
+        required: true
+        type: string
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+
+    # Reading the tag's tree is all this job needs; the default token is read-only here.
+    permissions:
+      contents: read
+
+    steps:
+      # Check out the RELEASE'S TAG, not the default branch: the screenshot folder
+      # (images/releases/<tag>/) lives in the tag's tree, so the attachments match the
+      # release being announced.
+      - name: Checkout the release tag
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+
+      # The release's fields cross into the Node script as environment variables: one API
+      # read, then per-field extraction with jq. The body is arbitrary changelog markdown
+      # and is only ever held as data — captured by quoted command substitution, never
+      # re-parsed by the shell. publishedAt arrives as the raw ISO string from the API
+      # (bash does no date conversion), and the script re-normalizes it anyway.
+      - name: Post the release to Discord
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISCORD_RELEASES_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASES_WEBHOOK_URL }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          RELEASE_JSON="$(gh release view "$RELEASE_TAG" --json name,body,url,publishedAt)"
+          RELEASE_NAME="$(jq -r .name <<<"$RELEASE_JSON")"
+          RELEASE_BODY="$(jq -r .body <<<"$RELEASE_JSON")"
+          RELEASE_URL="$(jq -r .url <<<"$RELEASE_JSON")"
+          RELEASE_PUBLISHED_AT="$(jq -r .publishedAt <<<"$RELEASE_JSON")"
+          export RELEASE_NAME RELEASE_BODY RELEASE_URL RELEASE_PUBLISHED_AT
+          node .github/scripts/post-discord-release.mjs

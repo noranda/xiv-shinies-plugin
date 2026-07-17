@@ -98,8 +98,15 @@ const name = process.env.RELEASE_NAME || tag;
 const body = process.env.RELEASE_BODY ?? "";
 
 // The embed's timestamp is the release's own publish time when the workflow provides it;
-// the moment this script happens to run is only a fallback.
-const timestamp = process.env.RELEASE_PUBLISHED_AT || new Date().toISOString();
+// the moment this script happens to run is only a fallback. Discord rejects the whole
+// embed unless the timestamp is ISO 8601, and the value's spelling depends on the calling
+// shell — PowerShell 7's ConvertFrom-Json turns ISO date strings into DateTime objects,
+// which stringify into a culture-formatted date on the way into the environment — so
+// whatever arrives is parsed and re-emitted in the one form Discord accepts.
+const publishedAtMs = Date.parse(process.env.RELEASE_PUBLISHED_AT ?? "");
+const timestamp = Number.isNaN(publishedAtMs)
+    ? new Date().toISOString()
+    : new Date(publishedAtMs).toISOString();
 
 const payload = {
   username: USERNAME,

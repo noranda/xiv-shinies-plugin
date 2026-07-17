@@ -149,5 +149,9 @@ jobs:
           $env:RELEASE_BODY = $release.body
           $env:RELEASE_URL = $release.url
           $env:RELEASE_TAG = $env:GITHUB_REF_NAME
-          $env:RELEASE_PUBLISHED_AT = $release.publishedAt
+          # PowerShell 7's ConvertFrom-Json parses the JSON's ISO date string into a DateTime
+          # object, and a DateTime dropped into the environment stringifies in the runner's
+          # culture format. Discord's embed timestamp must be ISO 8601, so the value is
+          # explicitly re-serialized ("o" is the ISO round-trip format).
+          $env:RELEASE_PUBLISHED_AT = ([datetime]$release.publishedAt).ToUniversalTime().ToString("o")
           node .github/scripts/post-discord-release.mjs
