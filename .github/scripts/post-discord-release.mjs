@@ -28,11 +28,20 @@ const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 // posts are tellable apart at a glance in the shared channel.
 const EMBED_COLOR = 0xfac424;
 
-// The plugin's user-facing name and icon, shown as the webhook's author identity. The
-// avatar must be a public URL, so it points at the icon on raw.githubusercontent.com.
+// The plugin's user-facing name and avatar, shown as the webhook's author identity. The
+// avatar is the site's own favicon — the same mascot artwork as the plugin's installer
+// icon, served from xiv-shinies.com because Discord renders webhook avatars from there
+// reliably but shows its default avatar for raw.githubusercontent.com URLs. The app's
+// announcements wear the same face; the username, embed color, and title icon are what
+// tell the two products apart in the shared channel.
 const USERNAME = "XIV Shinies Sync";
-const AVATAR_URL =
-  "https://raw.githubusercontent.com/noranda/xiv-shinies-plugin/main/src/XIVShinies.SyncPlugin/images/icon.png";
+const AVATAR_URL = "https://xiv-shinies.com/favicon.png";
+
+// Leads the embed title, marking this as a PLUGIN release in the #releases channel the two
+// products share — the web app's announcements lead with their own icon (🚀), and the pair
+// plus the embed colors keep the two tellable apart at a glance. Discord-only presentation:
+// the GitHub Release title itself stays unprefixed.
+const TITLE_ICON = "🔌";
 
 // Reads one required value out of the environment, failing loudly rather than posting
 // a half-empty embed. The webhook URL is checked separately so DRY_RUN works without it.
@@ -113,7 +122,7 @@ const payload = {
   avatar_url: AVATAR_URL,
   embeds: [
     {
-      title: name,
+      title: `${TITLE_ICON} ${name}`,
       url,
       description: truncate(body),
       color: EMBED_COLOR,
