@@ -9,11 +9,11 @@ verbatim into the release it publishes. Sections are added by the release flow (
 
 ## v0.3.0 — 2026-07-16
 
-- Gear stored in the glamour dresser as part of an outfit now counts toward your relic proofs
-- Occult Crescent's currencies no longer reset to zero when you sync from outside the zone
-- The "Reading from" panel shows healthy sources as compact chips, with details on hover
-- Currencies appear in the "Reading from" panel as their own source
-- New plugin releases are announced automatically in the XIV Shinies Discord
+- Count gear stored in dresser outfits toward your relic proofs
+- Stop out-of-zone syncs from zeroing Occult Crescent currencies
+- Show healthy sources as compact chips in the Reading from panel
+- List currencies as their own source in the Reading from panel
+- Announce new plugin releases in the XIV Shinies Discord
 
 ## v0.2.0 — 2026-07-15
 
