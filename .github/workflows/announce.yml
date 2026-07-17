@@ -21,18 +21,18 @@ jobs:
   announce:
     runs-on: ubuntu-latest
 
-    # Reading the tag's tree is all this job needs; the default token is read-only here.
+    # Reading the checked-out tree is all this job needs; the default token is read-only here.
     permissions:
       contents: read
 
     steps:
-      # Check out the RELEASE'S TAG, not the default branch: the screenshot folder
-      # (images/releases/<tag>/) lives in the tag's tree, so the attachments match the
-      # release being announced.
-      - name: Checkout the release tag
+      # Check out the DISPATCHED ref (main, normally) rather than the release's tag: a
+      # recovery run must use the newest announcement script — the tag's tree carries
+      # whatever version existed at release time, possibly including the very bug being
+      # recovered from. The screenshots still match the release, because per-release
+      # folders (images/releases/<tag>/) are committed on main and stay there.
+      - name: Checkout
         uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.tag }}
 
       # The release's fields cross into the Node script as environment variables: one API
       # read, then per-field extraction with jq. The body is arbitrary changelog markdown
