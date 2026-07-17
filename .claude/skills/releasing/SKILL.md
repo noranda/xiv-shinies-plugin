@@ -129,7 +129,14 @@ digraph release_flow {
    ```
 
    Write for players installing the plugin, not for developers: no internal refactors, no
-   file names, no PR numbers. This section becomes the GitHub Release notes verbatim.
+   file names, no PR numbers. This section becomes the GitHub Release notes verbatim — and
+   the Discord announcement's embed text. Two hard style rules, matching the web app's
+   changelog so the two products read as one voice in the shared #releases channel:
+   - **Every bullet starts with a verb** (Stop, Support, Link, Show, Count, Fix, …) —
+     "Count outfit gear toward relic proofs", never "Outfit gear now counts…".
+   - **Keep each bullet to at most 75 characters**: at the embed's rendered width that is
+     one line, and a bullet that wraps mid-sentence reads worse in Discord than a shorter
+     one that says less.
 3. Present the section as plain text for approval. Wait.
 4. If on `main`, `git switch -c release/vX.Y.Z`; on any other branch, stay put and say so.
 5. Insert the section directly under the CHANGELOG's intro (newest first), stage the file,
