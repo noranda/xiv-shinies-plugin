@@ -195,6 +195,20 @@ publishes the release. The `protect-release-tags` ruleset makes pushed `v*` tags
 a mistagged release is fixed by an admin deliberately deleting the tag (bypass), never by
 moving it.
 
+**Check off the release PR's checkboxes as the post-merge steps complete.** The PR body's
+test-plan and post-merge checklists are the release's record; a merged release PR with
+unchecked boxes reads as unverified forever. Tick each box only once its item is actually
+confirmed (the workflow published, the asset URL answers, the in-game update worked), then
+write the body back:
+
+```powershell
+& "C:\Program Files\GitHub CLI\gh.exe" pr view <N> --json body -q .body   # flip - [ ] to - [x] for verified items
+& "C:\Program Files\GitHub CLI\gh.exe" pr edit <N> --body-file <edited-body.md>
+```
+
+Never tick a box for a step that was skipped or is still pending — an honest unchecked box
+beats a false record.
+
 ## Red Flags — STOP
 
 | Excuse | Reality |
