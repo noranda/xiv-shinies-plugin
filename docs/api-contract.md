@@ -16,8 +16,8 @@ uses when building or changing any request/response type.
 ## Overview
 
 The plugin reads completion facts directly from the game client — completed quest IDs,
-achievement/mount/minion unlock IDs, possession counts for server-requested items — and
-uploads them over HTTPS. **The server does all derivation** (quest completion, relic steps);
+achievement/mount/minion unlock IDs, possession counts for server-requested items, journal
+sequence positions for server-requested quests — and uploads them over HTTPS. **The server does all derivation** (quest completion, relic steps);
 the plugin never computes app concepts, so new relic series, quest links, and proof rules
 ship without a plugin update.
 
@@ -102,6 +102,7 @@ read per request, so a flipped kill switch reaches the plugin on its next poll.
     "items": true,
     "minions": true,
     "mounts": true,
+    "questSequences": true,
     "quests": true
   },
   "enabled": true,             // global kill switch
@@ -116,7 +117,8 @@ read per request, so a flipped kill switch reaches the plugin on its next poll.
     {"key": "relic-currencies", "label": "Currencies (including gil)", "ids": [1, 28]}
   ],
   "itemOmitWhenUnseenIds": [45043, 45044], // content-bound ids: omit from uploads when no source saw them
-  "manifestVersion": "a1b2c3d4e5f6"
+  "manifestVersion": "a1b2c3d4e5f6",
+  "questSequenceManifest": [70991] // quests whose journal sequence byte to report
 }
 ```
 
@@ -152,6 +154,14 @@ read per request, so a flipped kill switch reaches the plugin on its next poll.
   inventory when the version it last scanned against is unchanged. Echo it back in the
   sync payload's optional `manifestVersion` field. Compare for equality only — it is a
   hash, not a counter.
+- **`questSequenceManifest`** (optional). The quest ids whose journal sequence the plugin
+  should report through the `questSequences` sync category. The server names only quests
+  with several sequential turn-ins, where the sequence byte is the sole client-side trace
+  of mid-chain progress. The plugin looks up **only** these ids and never interprets the
+  bytes. Deliberately outside the `manifestVersion` hash — the lookup is a handful of
+  in-memory reads, nothing to cache-skip. A config without the field asks about nothing
+  (the category is skipped, not sent empty); the `questSequences` category rides the
+  standard `categories` kill-switch map.
 
 Statuses: **200**, **401**, **405** (non-GET).
 
@@ -178,7 +188,8 @@ request without it is rejected with **413**. Maximum body size is **1 MiB** by d
     "minions": [2, 8],
     "mounts": [1, 5],
     "quests": [65575, 66216], // Quest Excel row ids == the server's Quest.id
-    "items": [{"id": 7851, "count": 1, "hqCount": 2, "fresh": true}]
+    "items": [{"id": 7851, "count": 1, "hqCount": 2, "fresh": true}],
+    "questSequences": {"70991": 3} // active journal sequence byte per manifested quest
   },
   "itemSources": { // optional — how each storage source was read this pass
     "inventory": {"state": "live"},
@@ -204,6 +215,7 @@ Field constraints:
 | id-list categories       | arrays of positive integers, **max 50,000 ids per category**                             |
 | `items`                  | `{id: positive int, count: non-negative int, hqCount?: positive int, collectableCount?: positive int, fresh: boolean}[]`, **max 10,000 entries** |
 | `itemSources`            | optional object keyed by source name; each value `{state: "live"\|"cached"\|"unscanned"\|"loaded", count?: int, total?: int}` |
+| `questSequences`         | object mapping quest id (digit-string key, ≤ 10 digits) → sequence byte (int 0–255), **max 100 entries** |
 
 - **Unknown `collections` keys are stripped and logged, never rejected** — a plugin newer
   than the server keeps working (payload evolution is additive-only). An older plugin simply
@@ -237,11 +249,22 @@ Field constraints:
   scanned means two retainers contribute nothing yet. Both are counts only; nothing
   identifies an individual retainer. `inventory` covers the containers read live each pass
   (bags, equipped gear, the armoury chest, crystals); `currencies` covers the game's
-  currency subsystem (gil, tomestones, scrips, and the rest), also read live. Source keys
-  evolve additively — the server must accept keys it does not recognize.
+  currency subsystem (gil, tomestones, scrips, and the rest), also read live. The accepted
+  source keys are a **closed set** (`inventory`, `saddlebag`, `retainers`, `armoire`,
+  `glamourDresser`, `currencies`) — an unrecognized key fails validation and rejects the
+  whole upload, so a new source key ships server-first, and any source the plugin tracks
+  for display only (an unreadable source such as mannequins) must stay off the wire.
 - `fresh: false` means the count came from a cache rather than a live container read. The
   server treats a stale positive as a positive (the item *was* there), so the flag does not
   change the outcome.
+- **`questSequences`** carries an entry only for a manifested quest **currently in the
+  journal**: the key is the quest's Excel row id as a decimal string, the value the raw
+  sequence byte the game reports. An empty object means "every manifested quest was
+  checked; none is active"; omitting the category means it was not read. The bytes are
+  opaque, game-defined values per quest — the plugin reports them uninterpreted, and the
+  server's curated tables decide what each byte proves. Observations are **sticky
+  server-side**: a quest absent from a later upload (abandoned, completed, never started —
+  the plugin cannot tell which) never clears previously derived credit.
 
 #### Response (200)
 
@@ -259,14 +282,15 @@ Field constraints:
   "achievementsSkipped": "not_sent", // present iff the achievements key was absent or stripped as disabled (an explicit empty array is "sent")
   "provenSteps": 3, // present iff items were applied and relic-proof derivation succeeded
   "itemCounts": 1268, // rows written to item-count storage by this upload's items
-  "skippedCategories": ["minions"] // present iff the server stripped disabled categories from this payload
+  "skippedCategories": ["minions"], // present iff the server stripped disabled categories from this payload
+  "storedSequences": 1 // present iff questSequences survived the strip and stored; NEW observations this upload (0 = all already known)
 }
 ```
 
 Optional keys are **omitted rather than null**, so the plugin can feature-detect them.
 `items` never appears in `written` (it feeds relic proofs and count storage, not a
-collection count). `itemCounts` is informational, like `written`: the plugin ignores both —
-no plugin logic may branch on them.
+collection count). `itemCounts` and `storedSequences` are informational, like `written`:
+the plugin ignores them — no plugin logic may branch on them.
 
 #### Status codes
 
