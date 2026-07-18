@@ -5,6 +5,14 @@
   "Description": "Automatically records your collection progress on XIV Shinies (https://xiv-shinies.com). New unlocks — quests, achievements, mounts, minions, and more — appear on the site within seconds, and everything else syncs automatically in the background. Fully opt-in: nothing uploads until you finish the short setup, and you choose exactly which collections to send. Use /shinies to get started.",
   "ApplicableVersion": "any",
   "RepoUrl": "https://github.com/noranda/xiv-shinies-plugin",
+  "IconUrl": "https://raw.githubusercontent.com/noranda/xiv-shinies-plugin/main/src/XIVShinies.SyncPlugin/images/icon.png",
+  "ImageUrls": [
+    "https://raw.githubusercontent.com/noranda/xiv-shinies-plugin/main/images/screenshots/settings-1-masthead-sync.png",
+    "https://raw.githubusercontent.com/noranda/xiv-shinies-plugin/main/images/screenshots/settings-2-collections.png",
+    "https://raw.githubusercontent.com/noranda/xiv-shinies-plugin/main/images/screenshots/settings-5-uploads.png",
+    "https://raw.githubusercontent.com/noranda/xiv-shinies-plugin/main/images/screenshots/wizard-1-welcome.png",
+    "https://raw.githubusercontent.com/noranda/xiv-shinies-plugin/main/images/screenshots/wizard-3-collections.png"
+  ],
   "CategoryTags": [
     "utility"
   ],
