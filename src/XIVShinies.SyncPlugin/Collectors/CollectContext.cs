@@ -106,6 +106,49 @@ public sealed record CollectContext
     }
 
     /// <summary>
+    /// The quest ids whose journal sequence the server wants reported, truncated to
+    /// <see cref="MaxManifestItems"/>. Empty when no config has been fetched or the server does
+    /// not send the field — either way there is nothing to look up.
+    /// </summary>
+    /// <remarks>
+    /// Reading a sequence is one walk of the game's active-quest array — far cheaper than the
+    /// container scans behind <see cref="ItemManifest"/> — but the list is still server-controlled
+    /// input consumed on the framework thread, so it goes through the same bound. Sharing the item
+    /// cap (rather than inventing a second constant) keeps "how much may a server ask of one pass"
+    /// a single number.
+    /// </remarks>
+    // Recomputed on each read like ItemManifest; the collector reads it once per pass.
+    public IReadOnlyList<uint> QuestSequenceManifest
+    {
+        get
+        {
+            var manifest = RemoteConfig?.QuestSequenceManifest;
+            if (manifest is null)
+                return Array.Empty<uint>();
+
+            if (manifest.Count <= MaxManifestItems)
+                return manifest;
+
+            // The hostile path only: copy the sane prefix and ignore the rest.
+            var bounded = new uint[MaxManifestItems];
+            for (var i = 0; i < MaxManifestItems; i++)
+                bounded[i] = manifest[i];
+
+            return bounded;
+        }
+    }
+
+    /// <summary>
+    /// True when <see cref="QuestSequenceManifest"/> was clipped at
+    /// <see cref="MaxManifestItems"/> — the server asked about more quests than the plugin will
+    /// look up, and the tail is not being reported. Surfaced separately from
+    /// <see cref="ManifestTruncated"/> so the orchestrator's warning can name which manifest was
+    /// clipped.
+    /// </summary>
+    public bool QuestSequenceManifestTruncated =>
+        RemoteConfig?.QuestSequenceManifest is { } manifest && manifest.Count > MaxManifestItems;
+
+    /// <summary>
     /// True when <see cref="ItemManifest"/> was clipped at <see cref="MaxManifestItems"/> —
     /// the server asked about more ids than the plugin is willing to scan, and the tail is not
     /// being reported.

@@ -403,6 +403,58 @@ public class DtoSerializationTests
     }
 
     [Fact]
+    public void ConfigResponse_deserializes_the_quest_sequence_manifest()
+    {
+        const string json = """
+            {"categories":{},"enabled":true,
+             "intervals":{"fullSyncMinutes":30,"unlockDebounceSeconds":5},
+             "itemManifest":[],"manifestVersion":"abc123",
+             "questSequenceManifest":[70562,69208]}
+            """;
+
+        var config = JsonSerializer.Deserialize<ConfigResponse>(json, ApiJson.Options)!;
+
+        Assert.Equal(new uint[] { 70562, 69208 }, config.QuestSequenceManifest);
+    }
+
+    [Fact]
+    public void ConfigResponse_without_a_quest_sequence_manifest_leaves_it_null()
+    {
+        // An older server never sends the field. Null (rather than a deserialization failure or an
+        // empty default) is the signal that the server is not asking about any quest sequences.
+        const string json = """
+            {"categories":{},"enabled":true,
+             "intervals":{"fullSyncMinutes":30,"unlockDebounceSeconds":5},
+             "itemManifest":[],"manifestVersion":"abc123"}
+            """;
+
+        var config = JsonSerializer.Deserialize<ConfigResponse>(json, ApiJson.Options)!;
+
+        Assert.Null(config.QuestSequenceManifest);
+    }
+
+    // Quest sequences travel as an OBJECT keyed by quest id, not an array: the value (which step
+    // the journal is on) belongs to the id, and an object makes that pairing unambiguous on the
+    // wire. JSON object keys are strings, so the uint ids serialize as their decimal strings.
+    [Fact]
+    public void Quest_sequences_serialize_as_an_object_keyed_by_quest_id()
+    {
+        var request = MinimalRequest() with
+        {
+            Collections = new Dictionary<string, JsonNode>
+            {
+                ["questSequences"] = SyncFacts.Sequences(
+                    new Dictionary<uint, byte> { [70562] = 3, [69208] = 255 }),
+            },
+        };
+
+        var sequences = Serialize(request)["collections"]!["questSequences"]!.AsObject();
+
+        Assert.Equal(3, sequences["70562"]!.GetValue<int>());
+        Assert.Equal(255, sequences["69208"]!.GetValue<int>());
+    }
+
+    [Fact]
     public void ItemSourceStatus_serializes_state_and_optional_counts()
     {
         var live = new ItemSourceStatus { State = SourceStates.Live };

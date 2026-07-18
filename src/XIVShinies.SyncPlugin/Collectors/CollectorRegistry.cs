@@ -26,6 +26,19 @@ public static class CollectorRegistry
         WhatGetsSent = "The ID numbers of quests you have completed.",
     };
 
+    private static readonly CategoryInfo QuestSequences = new()
+    {
+        Key = CategoryKeys.QuestSequences,
+        DisplayName = "Quest progress",
+
+        // Scoped twice over, and the copy says both halves: only quests the server named are
+        // looked at, and only the journal's step position — never objective text, locations, or
+        // anything else the journal knows — leaves the machine.
+        WhatGetsSent =
+            "For the specific quests XIV Shinies asks about, which step of that quest your " +
+            "journal is currently on. Nothing is sent about any other quest.",
+    };
+
     private static readonly CategoryInfo Mounts = new()
     {
         Key = CategoryKeys.Mounts,
@@ -92,6 +105,10 @@ public static class CollectorRegistry
             // Quest Excel row IDs are what the server stores, so no mapping is needed.
             new ExcelUnlockCollector<Quest>(
                 Quests, dataManager, framework, row => row.RowId, unlockState.IsQuestCompleted),
+
+            // The journal positions of the quests the server's manifest asks about. Scope comes
+            // from the manifest each pass, so this needs the context rather than a sheet.
+            new QuestSequenceCollector(QuestSequences, framework),
 
             new ExcelUnlockCollector<Mount>(
                 Mounts, dataManager, framework, row => row.RowId, unlockState.IsMountUnlocked),

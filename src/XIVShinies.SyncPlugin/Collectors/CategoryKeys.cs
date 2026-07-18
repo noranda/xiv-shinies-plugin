@@ -25,4 +25,7 @@ public static class CategoryKeys
 
     /// <summary>Possession counts for the items the server asked about.</summary>
     public const string Items = "items";
+
+    /// <summary>Journal sequence positions for the quests the server asked about.</summary>
+    public const string QuestSequences = "questSequences";
 }

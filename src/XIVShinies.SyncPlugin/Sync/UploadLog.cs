@@ -147,11 +147,18 @@ public sealed record UploadLogEntry
     }
 
     /// <summary>
-    /// How many facts a category's JSON carries. Every category today is an array (of ids, or of
-    /// item-count objects); anything else counts as one fact rather than crashing the log.
+    /// How many facts a category's JSON carries. Array categories (id lists, item-count objects)
+    /// count their elements; object categories (quest id → sequence) count their members. Any
+    /// other shape counts as one fact rather than crashing or hiding it in the log.
     /// </summary>
-    private static int CountFacts(JsonNode facts) =>
-        facts is JsonArray array ? array.Count : 1;
+    // A `switch` EXPRESSION: each arm is `pattern => value`, and `_` is the required
+    // catch-all — like a chain of ternaries in JS, but the compiler checks the patterns.
+    private static int CountFacts(JsonNode facts) => facts switch
+    {
+        JsonArray array => array.Count,
+        JsonObject members => members.Count,
+        _ => 1,
+    };
 
     /// <summary>
     /// A short, deterministic hash of a category's facts. Collectors build their facts in a

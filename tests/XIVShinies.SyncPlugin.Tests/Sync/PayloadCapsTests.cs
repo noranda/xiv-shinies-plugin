@@ -142,8 +142,9 @@ public class PayloadCapsTests
     [Fact]
     public void A_non_array_category_value_passes_through_untouched()
     {
-        // Today every category serializes to an array, but the caps are count limits on arrays —
-        // any other JSON shape a future category might carry is not this class's business.
+        // The caps are count limits on arrays — any other JSON shape a category carries (the
+        // questSequences object, for example) is not this class's business and rides through
+        // untouched.
         var collections = new Dictionary<string, JsonNode>
         {
             ["future"] = new JsonObject { ["someFlag"] = true },

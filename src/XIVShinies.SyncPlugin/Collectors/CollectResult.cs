@@ -17,8 +17,9 @@ public static class CollectSkipReasons
     public const string SheetUnavailable = "sheet_unavailable";
 
     /// <summary>
-    /// The server has not told us which items it cares about yet, so we cannot know what to look
-    /// for. Distinct from "the manifest is empty", which means there is genuinely nothing to check.
+    /// The server has not told us what this collection should look for yet — its manifest (item
+    /// ids, quest ids) has not been received. Distinct from "the manifest is empty", which means
+    /// there is genuinely nothing to check.
     /// </summary>
     public const string NoRemoteConfig = "no_remote_config";
 
@@ -69,8 +70,10 @@ public static class CollectSkipReasons
         AchievementListNotLoaded =>
             "not read yet — open your Achievements window in game once, then press Sync now.",
 
+        // The hint names no category on purpose: every manifest-driven collection — item counts
+        // and quest sequences alike — reports this same reason.
         NoRemoteConfig =>
-            "not read yet — waiting for XIV Shinies to say which items to look for.",
+            "not read yet — waiting for XIV Shinies to say what to look for.",
 
         InventoryUnavailable =>
             "not read yet — log in to a character so your inventory can be read.",
@@ -152,6 +155,28 @@ public sealed record CollectResult
     /// <summary>Facts for the <c>items</c> category, which carries objects rather than IDs.</summary>
     public static CollectResult Items(IReadOnlyList<ItemPossession> items) =>
         Items(items, sourceNotes: null);
+
+    /// <summary>
+    /// Facts for the <c>questSequences</c> category: which step of each asked-about quest the
+    /// journal is currently on, keyed by quest id.
+    /// </summary>
+    /// <remarks>
+    /// A zero quest id is dropped for the same reason <see cref="Ids"/> drops zeroes: the server
+    /// requires positive ids, and one invalid entry would reject the entire upload. An empty map is
+    /// a legitimate result ("every asked-about quest was checked; none is in the journal") and is
+    /// deliberately different from a skip.
+    /// </remarks>
+    public static CollectResult Sequences(IReadOnlyDictionary<uint, byte> sequences)
+    {
+        var positiveIdSequences = new Dictionary<uint, byte>(sequences.Count);
+        foreach (var (questId, sequence) in sequences)
+        {
+            if (questId != 0)
+                positiveIdSequences[questId] = sequence;
+        }
+
+        return new() { Facts = SyncFacts.Sequences(positiveIdSequences) };
+    }
 
     /// <summary>
     /// Facts for the <c>items</c> category, along with per-source scan status (which containers were
