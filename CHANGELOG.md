@@ -7,6 +7,14 @@ as the GitHub release notes for that version: the release workflow copies the to
 verbatim into the release it publishes. Sections are added by the release flow (see
 `.claude/skills/releasing/`), one per release, immediately under this line.
 
+## v0.4.0 — 2026-07-18
+
+- Sync your progress through multi-part relic turn-in quests (opt-in)
+- Explain in settings why mannequin gear can't sync, with a workaround
+- Draw the status chips as pills with breathing room when rows wrap
+- Clarify the waiting message shown right after logging in
+- Log outgoing sync data at Verbose level for troubleshooting
+
 ## v0.3.0 — 2026-07-16
 
 - Count gear stored in dresser outfits toward your relic proofs
