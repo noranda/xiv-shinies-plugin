@@ -98,7 +98,14 @@ internal sealed partial class MainWindow
             // Normal text color, like the colored states around it: this line IS the sync card's
             // status — the sentence the user came to read — even though it is neither good news nor
             // bad.
-            ImGui.TextUnformatted("Waiting for a character to finish logging in.");
+            //
+            // This state covers two moments the plugin cannot tell apart from here: nobody is
+            // logged in at all, and the few seconds right after login while the character is still
+            // being identified (identity is only captured once the game reports it settled). The
+            // copy speaks to both — naming the post-login delay matters most, because a player who
+            // IS logged in would otherwise read "waiting for a character" as the plugin failing to
+            // see them.
+            ImGui.TextUnformatted("Waiting for a character — syncing starts a few seconds after you log in.");
         }
         else if (syncManager.LastStatus is { } status)
         {
@@ -285,9 +292,17 @@ internal sealed partial class MainWindow
             // DrawChip ends each chip's row (its footprint Dummy advances the cursor to the next
             // line), so continuing the row is the explicit act: SameLine only when this chip still
             // fits before the card's inner edge. When it does not, the cursor is already sitting at
-            // the start of a fresh line and the row simply wraps.
+            // the start of a fresh line and the row wraps — with a little vertical air first,
+            // because back-to-back rows of outlined chips sit flush otherwise. The gap is tighter
+            // than the horizontal chipGap: rows read as one group, not as separate sections.
             if (anyChipDrawn && rowRight + chipGap + width <= innerRight)
+            {
                 ImGui.SameLine(0f, chipGap);
+            }
+            else if (anyChipDrawn)
+            {
+                ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (4f * ImGuiHelpers.GlobalScale));
+            }
 
             var chipStart = ImGui.GetCursorPosX();
             DrawChip(icon, note.Label, ToneColor(note.Tone));
@@ -325,9 +340,9 @@ internal sealed partial class MainWindow
 
     /// <summary>
     /// Maps a source note's tone to the color it draws in. A switch on the <em>tone</em>, never on a
-    /// source key or scan-state string — the three tones are the only vocabulary this method knows,
-    /// so a future storage source colors correctly the moment <see cref="SourceNoteText.Describe"/>
-    /// assigns it one of the three, with no change needed here.
+    /// source key or scan-state string — the tones are the only vocabulary this method knows, so a
+    /// future storage source colors correctly the moment <see cref="SourceNoteText.Describe"/>
+    /// assigns it one of them, with no change needed here.
     /// </summary>
     private static Vector4 ToneColor(SourceTone tone) =>
         tone switch
@@ -336,8 +351,11 @@ internal sealed partial class MainWindow
             SourceTone.Cached => Widgets.CautionColor,
             SourceTone.Missing => Widgets.ErrorColor,
 
-            // The enum has exactly three members today; this arm exists only so the expression is
-            // exhaustive against a future fourth tone without throwing at draw time.
+            // Muted on purpose: an unreadable source is information, not a problem to solve, and
+            // any alarm color would read as one.
+            SourceTone.Unreadable => ImGuiColors.DalamudGrey,
+
+            // Keeps the expression exhaustive against a future tone without throwing at draw time.
             _ => ImGuiColors.DalamudGrey,
         };
 
@@ -352,8 +370,12 @@ internal sealed partial class MainWindow
             SourceTone.Cached => FontAwesomeIcon.Clock,
             SourceTone.Missing => FontAwesomeIcon.ExclamationCircle,
 
+            // A struck-through eye: the game itself cannot see this source. Paired with the muted
+            // color above, and the chip's hover explains why.
+            SourceTone.Unreadable => FontAwesomeIcon.EyeSlash,
+
             // Mirrors ToneColor's fallback arm: keeps the expression exhaustive against a future
-            // fourth tone without throwing at draw time.
+            // tone without throwing at draw time.
             _ => FontAwesomeIcon.QuestionCircle,
         };
 

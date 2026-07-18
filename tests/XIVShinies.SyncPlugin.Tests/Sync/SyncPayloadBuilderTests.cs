@@ -41,6 +41,48 @@ public class SyncPayloadBuilderTests
         Assert.Null(request.ItemSources);
     }
 
+    // The unreadable state exists for the settings panel only: it marks a source the game never
+    // exposes (mannequins), so it carries no counts the server could judge. Sending it would be
+    // a constant fact repeated on every upload — noise the data-minimization rule says to omit.
+    [Fact]
+    public void An_unreadable_source_note_stays_off_the_wire()
+    {
+        var snapshot = Snapshot("items") with
+        {
+            SourceNotes = new Dictionary<string, ItemSourceStatus>
+            {
+                [SourceKeys.Inventory] = new ItemSourceStatus { State = SourceStates.Live },
+                [SourceKeys.Mannequins] = new ItemSourceStatus { State = SourceStates.Unreadable },
+            },
+        };
+
+        var request = SyncPayloadBuilder.Build(
+            Identity, "1.0.0", SyncTrigger.Manual, snapshot, manifestVersion: null);
+
+        Assert.NotNull(request.ItemSources);
+        Assert.True(request.ItemSources!.ContainsKey(SourceKeys.Inventory));
+        Assert.False(request.ItemSources.ContainsKey(SourceKeys.Mannequins));
+    }
+
+    [Fact]
+    public void A_snapshot_whose_only_source_note_is_unreadable_yields_no_item_sources()
+    {
+        // With the unreadable note dropped there is nothing left to say, and an empty itemSources
+        // object is exactly the noise the omitted-key rule exists to avoid.
+        var snapshot = Snapshot("items") with
+        {
+            SourceNotes = new Dictionary<string, ItemSourceStatus>
+            {
+                [SourceKeys.Mannequins] = new ItemSourceStatus { State = SourceStates.Unreadable },
+            },
+        };
+
+        var request = SyncPayloadBuilder.Build(
+            Identity, "1.0.0", SyncTrigger.Manual, snapshot, manifestVersion: null);
+
+        Assert.Null(request.ItemSources);
+    }
+
     [Fact]
     public void Carries_the_identity_version_and_trigger()
     {

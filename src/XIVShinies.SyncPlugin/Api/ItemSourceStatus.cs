@@ -60,6 +60,18 @@ public static class SourceStates
     /// the first time the player opens the armoire each session.
     /// </summary>
     public const string Loaded = "loaded";
+
+    /// <summary>
+    /// The game never exposes this source to plugins at all — no live read, no cache, and no
+    /// player action that changes that. Distinct from <see cref="Unscanned"/>, which the player
+    /// can resolve by opening the source once.
+    /// </summary>
+    /// <remarks>
+    /// Local-only: this status exists so the settings window can say why such a source is absent
+    /// from the counts, and <see cref="Sync.SyncPayloadBuilder"/> drops it from the upload — a
+    /// source that can never carry counts tells the server nothing about how to judge them.
+    /// </remarks>
+    public const string Unreadable = "unreadable";
 }
 
 /// <summary>
@@ -105,4 +117,12 @@ public static class SourceKeys
 
     /// <summary>The glamour dresser — gear stored away for glamour use.</summary>
     public const string GlamourDresser = "glamourDresser";
+
+    /// <summary>
+    /// Housing mannequins — gear displayed on them. Always reported as
+    /// <see cref="SourceStates.Unreadable"/>: the game fetches a mannequin's contents only while
+    /// the player interacts with it inside the house and never caches them, so no plugin can read
+    /// them from anywhere. The key exists so the settings panel can say so; it never travels.
+    /// </summary>
+    public const string Mannequins = "mannequins";
 }

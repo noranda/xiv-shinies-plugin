@@ -54,6 +54,45 @@ public class ReadStatusViewTests
     private static CategorySettingsRow ManifestRow(string key = "items") =>
         Row(key, usesItemManifest: true);
 
+    // An unreadable source (mannequins) reaches the panel as a container chip like any other note
+    // the copy set describes — Build has no tone branch that could drop it, and this pins that.
+    [Fact]
+    public void An_unreadable_source_flows_through_as_a_container_chip()
+    {
+        var sources = new Dictionary<string, ItemSourceStatus>
+        {
+            [SourceKeys.Mannequins] = Status(SourceStates.Unreadable),
+        };
+
+        var status = ReadStatusView.Build(new[] { ManifestRow() }, sources);
+
+        var note = Assert.Single(status.Containers);
+        Assert.Equal("Mannequins", note.Label);
+        Assert.Equal(SourceTone.Unreadable, note.Tone);
+        Assert.Null(note.Text);
+        Assert.NotNull(note.Detail);
+    }
+
+    // Container notes keep the order the item pass reported them in — the collector reports the
+    // unreadable mannequins source last on purpose, so the one chip nothing can change sits at the
+    // end of the row rather than among the working sources.
+    [Fact]
+    public void Container_notes_keep_the_order_the_sources_were_reported_in()
+    {
+        var sources = new Dictionary<string, ItemSourceStatus>
+        {
+            [SourceKeys.Inventory] = Status(SourceStates.Live),
+            [SourceKeys.Saddlebag] = Status(SourceStates.Cached),
+            [SourceKeys.Mannequins] = Status(SourceStates.Unreadable),
+        };
+
+        var status = ReadStatusView.Build(new[] { ManifestRow() }, sources);
+
+        Assert.Equal(
+            new[] { "Inventory", "Saddlebag", "Mannequins" },
+            status.Containers.Select(note => note.Label));
+    }
+
     // A collection that was read this pass has nothing for the user to do, so it is a chip: the
     // green check IS "read", and the label is the collection's own display name. No sentence and no
     // hover copy — there is nothing more to say about a healthy collection.

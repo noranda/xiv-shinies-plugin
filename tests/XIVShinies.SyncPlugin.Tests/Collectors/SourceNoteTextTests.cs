@@ -22,6 +22,26 @@ public class SourceNoteTextTests
     private static ItemSourceStatus Status(string state, int? count = null, int? total = null) =>
         new() { State = state, Count = count, Total = total };
 
+    // Mannequins are the one source the game itself cannot expose: a mannequin's contents are
+    // fetched per-interaction inside the house and never cached, so no plugin can read them from
+    // anywhere. That is information, not a fault — nothing the user does changes it — so the note
+    // is a muted chip, and the whole explanation plus the optional retrieve-once workaround lives
+    // in the hover. A full line would nag forever about something unfixable.
+    [Fact]
+    public void An_unreadable_mannequin_source_is_a_chip_with_the_workaround_in_hover()
+    {
+        var note = SourceNoteText.Describe(SourceKeys.Mannequins, Status(SourceStates.Unreadable));
+
+        Assert.Equal("Mannequins", note!.Label);
+        Assert.Equal(SourceTone.Unreadable, note.Tone);
+        Assert.Null(note.Text);
+        Assert.Equal(
+            "Gear displayed on housing mannequins can't be read — the game never stores a " +
+            "mannequin's contents anywhere the plugin can see. To register a piece: retrieve " +
+            "it to your bags, sync, then put it back. XIV Shinies keeps proof it saw the piece.",
+            note.Detail);
+    }
+
     // A healthy live source is a chip: the green check says "read", so the note carries no sentence.
     // The detail names exactly which containers the inventory chip speaks for — bags, equipped gear,
     // the armoury chest, crystals — so a user wondering "is my equipped weapon counted?" can find out
@@ -269,6 +289,28 @@ public class SourceNoteTextTests
 
                     if (note is { Tone: SourceTone.Missing })
                         Assert.False(string.IsNullOrEmpty(note.Text));
+                }
+            }
+        }
+    }
+
+    // The chip-form twin of the invariant above: an Unreadable note draws as a muted chip whose
+    // ONLY content beyond its label is the hover Detail — no Text, no alarm color — so a Detail-less
+    // Unreadable note would be a bare grey chip that explains nothing. Swept the same way, so a
+    // future unreadable source cannot forget its explanation without failing here.
+    [Fact]
+    public void Every_unreadable_note_carries_the_hover_detail_that_explains_it()
+    {
+        foreach (var sourceKey in WireConstantsOf(typeof(SourceKeys)))
+        {
+            foreach (var state in WireConstantsOf(typeof(SourceStates)))
+            {
+                foreach (var (count, total) in new (int?, int?)[] { (null, null), (3, 5), (3, 3), (3, null) })
+                {
+                    var note = SourceNoteText.Describe(sourceKey, Status(state, count, total));
+
+                    if (note is { Tone: SourceTone.Unreadable })
+                        Assert.False(string.IsNullOrEmpty(note.Detail));
                 }
             }
         }

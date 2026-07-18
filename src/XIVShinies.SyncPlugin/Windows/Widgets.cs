@@ -619,7 +619,6 @@ internal static class Widgets
 
         var paddingX = 6f * ChipContentScale * ImGuiHelpers.GlobalScale;
         var paddingY = 2f * ChipContentScale * ImGuiHelpers.GlobalScale;
-        var rounding = 3f * ImGuiHelpers.GlobalScale;
         var thickness = 1f * ImGuiHelpers.GlobalScale;
 
         // The gap between the icon and the text, kept separate from the outline padding so either
@@ -654,6 +653,13 @@ internal static class Widgets
         var contentHeight = Math.Max(iconSize.Y, textSize.Y);
         var contentWidth = iconSize.X + iconTextGap + textSize.X;
         var chipSize = new Vector2(contentWidth + (2f * paddingX), contentHeight + (2f * paddingY));
+
+        // Rounding at half the chip's height makes the outline a full pill — semicircular ends,
+        // no straight corner anywhere — the same technique BrandToggle uses for its track. A
+        // pill reads as a tag; a slightly-rounded rectangle reads as a button waiting to be
+        // clicked, which these are not. Derived from the measured height rather than set as a
+        // constant so the ends stay semicircular at any font scale.
+        var rounding = chipSize.Y / 2f;
 
         return new ChipMetrics(
             glyph, text, iconSize, textSize, chipSize,
@@ -743,7 +749,7 @@ internal static class Widgets
 
     /// <summary>
     /// A small outlined "chip": an icon then a label, both shrunk (the icon further than the text),
-    /// inside a thin rounded rectangle, vertically centered against the standard checkbox row and
+    /// inside a thin pill outline, vertically centered against the standard checkbox row and
     /// flowing in-line at the current cursor position. Used for the "New" badge beside a freshly
     /// added consent group and for the read-status panel's per-source chips. The icon is a
     /// parameter, so any caller can reuse the same compact-tag look with a glyph of its own.
