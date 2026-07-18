@@ -24,14 +24,16 @@ public class CollectSkipReasonsTests
     }
 
     // The whole string is asserted, not just a keyword: a keyword check would still pass if two
-    // messages were swapped, and would tell the user to log in when the manifest is what is missing.
+    // messages were swapped, and would tell the user to log in when the manifest is what is
+    // missing. The string names no category-specific noun — see CollectSkipReasons.Describe for
+    // why the reason is shared.
     [Fact]
-    public void A_missing_item_manifest_explains_that_we_are_waiting_on_the_server()
+    public void A_missing_manifest_explains_that_we_are_waiting_on_the_server()
     {
         var hint = CollectSkipReasons.Describe(CollectSkipReasons.NoRemoteConfig);
 
         Assert.Equal(
-            "not read yet — waiting for XIV Shinies to say which items to look for.", hint);
+            "not read yet — waiting for XIV Shinies to say what to look for.", hint);
     }
 
     [Fact]

@@ -34,6 +34,12 @@ digraph commit_flow {
 
 ### 1. Check Status and Read Every Change
 
+- **NEVER commit on `main`.** Check `git branch --show-current` first: if it says `main`,
+  create or switch to a work branch (`feat/…`, `fix/…`, `release/vX.Y.Z`) before anything
+  else — including before the FIRST commit of a new piece of work, not just before pushing.
+  `origin/main` is protected and only moves through a pull request with a passing `build`
+  check, so a commit made on `main` cannot be pushed and has to be surgically moved to a
+  branch later.
 - **NEVER run `git add` / `git stage`.** The developer reviews the diff and stages the files
   themselves; staging on their behalf destroys the unstaged view they are reading. Read git state,
   never mutate it. If nothing is staged, say so and ask them to stage what they want committed —
@@ -122,6 +128,7 @@ If you catch yourself doing any of these, stop and correct:
 
 | Excuse                                         | Reality                                              |
 | ---------------------------------------------- | ---------------------------------------------------- |
+| "I'll commit on main and branch later if needed" | Branch BEFORE the first commit. main is PR-only; a commit on main must be surgically relocated. |
 | "The change is small, no need for approval"    | Every commit needs approval. No exceptions.          |
 | "I'll just `git add -A` so I can show the diff" | Never stage. The developer stages; `git add` wipes the unstaged view they're reviewing. |
 | "I'll add the signature as convention"         | No signatures. AI use is disclosed once in AI-DECLARATION.md, not per commit. |

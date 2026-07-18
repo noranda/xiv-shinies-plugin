@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -109,6 +110,29 @@ public static class SyncFacts
     /// <summary>Facts for the <c>items</c> category, which carries objects rather than IDs.</summary>
     public static JsonNode Items(IReadOnlyList<ItemPossession> items) =>
         JsonSerializer.SerializeToNode(items, ApiJson.Options)!;
+
+    /// <summary>
+    /// Facts for the <c>questSequences</c> category: which step of each asked-about quest the
+    /// journal is currently on, as an object keyed by quest id.
+    /// </summary>
+    /// <remarks>
+    /// Built by hand rather than serialized from the dictionary, because JSON object keys are
+    /// strings and the ids must become plain decimal strings (<c>"70562"</c>) — a serializer's
+    /// dictionary-key policy is one more thing that could silently reshape them.
+    /// </remarks>
+    public static JsonNode Sequences(IReadOnlyDictionary<uint, byte> sequences)
+    {
+        var facts = new JsonObject();
+        foreach (var (questId, sequence) in sequences)
+        {
+            // Widened to int before it enters the node: an in-memory JsonValue remembers the exact
+            // CLR type it was built from, so a byte-backed node would refuse GetValue<int>() until
+            // serialized. The wire output is the same plain JSON number either way.
+            facts[questId.ToString(CultureInfo.InvariantCulture)] = (int)sequence;
+        }
+
+        return facts;
+    }
 }
 
 /// <summary>How many of a manifest item the character possesses.</summary>

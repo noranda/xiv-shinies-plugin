@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Plugin.Services;
 using Lumina.Excel;
+using Serilog.Events;
 using XIVShinies.SyncPlugin.Api;
 using XIVShinies.SyncPlugin.Collectors;
 
@@ -174,6 +175,17 @@ internal sealed class SyncManager : IDisposable
     /// same single-writer discipline as the identity fields: one writer, one thread, no locks.
     /// </remarks>
     private string? truncationWarnedForManifest;
+
+    /// <summary>
+    /// True once the quest-sequence truncation warning has been logged this session. A plain
+    /// once-per-session latch (unlike the item warning's once-per-manifest-version gate) because
+    /// the quest-sequence manifest carries no version hash to compare against.
+    /// </summary>
+    /// <remarks>
+    /// Framework thread only, same single-writer discipline as
+    /// <see cref="truncationWarnedForManifest"/>.
+    /// </remarks>
+    private bool questTruncationWarned;
 
     /// <summary>
     /// Set when the server reported a failure only the user can fix. Suppresses all further work
@@ -799,6 +811,16 @@ internal sealed class SyncManager : IDisposable
                     "scanned or reported.");
             }
 
+            // The quest-sequence manifest clips under the same ceiling, made visible the same way.
+            if (snapshot.QuestSequenceManifestTruncated && !questTruncationWarned)
+            {
+                questTruncationWarned = true;
+                log.Warning(
+                    $"The server's quest-sequence manifest exceeds the " +
+                    $"{CollectContext.MaxManifestItems}-id ceiling; quests past the first " +
+                    $"{CollectContext.MaxManifestItems} will not be looked up or reported.");
+            }
+
             // Bound every category to the contract's caps before anything downstream sees it.
             // An over-cap payload is rejected whole by the server (400), losing every category
             // in it; truncating here keeps the rest of the upload alive. `snapshot with { ... }`
@@ -815,6 +837,30 @@ internal sealed class SyncManager : IDisposable
             }
 
             LogCollectionCost(snapshot, due.Trigger);
+
+            // The full facts of every category. This is the QA and support surface for collectors
+            // whose values matter and not just their counts — harvesting a quest's sequence bytes
+            // for the server's curated table, checking an item count against a container. Logged
+            // from the bounded snapshot, so it shows what actually ships. Facts stay on the
+            // user's machine: /xllog is local, and everything here is data the user consented to
+            // uploading anyway. A generic loop over whatever categories the pass produced —
+            // never a peek at one category by name.
+            //
+            // Verbose rather than Debug, deliberately: a quests line is tens of kilobytes, and at
+            // Debug it would drown the short timing/scheduling lines someone raising the level is
+            // usually after. Payload dumps sit one notch deeper in the /xllog dropdown.
+            //
+            // The level check guards eager work: C# interpolation is eager, so without it every
+            // pass would serialize every category to JSON (~100KB of throwaway strings) on the
+            // framework thread just to have Verbose discard the result at the default level.
+            // Guarded, the cost is zero unless the user has deliberately raised the plugin's
+            // level. (Serilog orders levels Verbose < Debug < Information, so "<= Verbose"
+            // means Verbose is actually enabled.)
+            if (log.MinimumLogLevel <= LogEventLevel.Verbose)
+            {
+                foreach (var (categoryKey, facts) in snapshot.Collections)
+                    log.Verbose($"{due.Trigger} facts for {categoryKey}: {facts.ToJsonString()}");
+            }
 
             // Kept for the settings window. An unlock pass runs only the collectors whose categories
             // changed, so it can speak for those and no others; replacing the whole map would erase

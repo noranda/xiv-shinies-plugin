@@ -200,6 +200,14 @@ public sealed unsafe class ItemCollector : ICollector
         // CACHED TALLY — the armoire, glamour dresser, saddlebags, and retainers, plus their notes.
         BuildCachedTallies(manifestIds, cached, sourceNotes);
 
+        // Mannequins are reported so the settings panel can say why displayed gear never counts:
+        // the game fetches a mannequin's contents only during an in-house interaction and never
+        // caches them, so there is nothing this collector could ever scan. The status is constant
+        // by nature and stays local — the payload builder drops unreadable sources from uploads.
+        // Reported after every scannable source, because the panel lists chips in report order and
+        // the one source that can never contribute belongs at the end, not among the working ones.
+        sourceNotes[SourceKeys.Mannequins] = new ItemSourceStatus { State = SourceStates.Unreadable };
+
         // ItemTallies applies the explicit-zero rule (one entry per valid manifest id), the
         // omit-when-unseen exception for the server's content-bound currency ids, and the
         // freshness rule (any cache contribution marks the entry not fresh). Named arguments are

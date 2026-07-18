@@ -107,4 +107,37 @@ public class CollectResultTests
         Assert.True(result.WasCollected);
         Assert.Null(result.SourceNotes);
     }
+
+    [Fact]
+    public void Sequences_carries_an_object_keyed_by_quest_id()
+    {
+        var result = CollectResult.Sequences(new Dictionary<uint, byte> { [70562] = 3 });
+
+        Assert.True(result.WasCollected);
+        Assert.Equal(3, result.Facts!.AsObject()["70562"]!.GetValue<int>());
+    }
+
+    // "Every manifested quest was checked and none is in the journal" is a real fact, distinct
+    // from a skip — the same collected-vs-skipped line the Ids and Items factories draw.
+    [Fact]
+    public void An_empty_sequence_map_is_still_a_collected_fact()
+    {
+        var result = CollectResult.Sequences(new Dictionary<uint, byte>());
+
+        Assert.True(result.WasCollected);
+        Assert.Null(result.SkipReason);
+        Assert.Empty(result.Facts!.AsObject());
+    }
+
+    // The same positive-integer defense Ids applies: the server rejects the whole upload over an
+    // invalid id, and this boundary is the one funnel where no collector can forget the rule.
+    [Fact]
+    public void Sequences_drops_a_zero_quest_id()
+    {
+        var result = CollectResult.Sequences(new Dictionary<uint, byte> { [0] = 2, [70562] = 3 });
+
+        var facts = result.Facts!.AsObject();
+        Assert.False(facts.ContainsKey("0"));
+        Assert.Equal(3, facts["70562"]!.GetValue<int>());
+    }
 }

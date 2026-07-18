@@ -56,6 +56,19 @@ public sealed record ConfigResponse
     public IReadOnlyList<uint>? ItemOmitWhenUnseenIds { get; init; }
 
     /// <summary>
+    /// Quest ids whose journal sequence the server wants reported — quests with several
+    /// sequential turn-ins, where knowing which step the journal is on lets the server credit
+    /// the batches already handed over. Null when the server does not send the field.
+    /// </summary>
+    /// <remarks>
+    /// The ids are Quest Excel row ids, the same id space the <c>quests</c> category uploads.
+    /// Which quests qualify is the server's catalog knowledge; the plugin reads the sequences
+    /// generically and never hardcodes a quest id.
+    /// </remarks>
+    // NOT `required`, for the same older-server reason as ItemManifestGroups above.
+    public IReadOnlyList<uint>? QuestSequenceManifest { get; init; }
+
+    /// <summary>
     /// Whether the server permits this category right now.
     /// </summary>
     /// <remarks>

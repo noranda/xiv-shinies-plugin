@@ -322,6 +322,78 @@ public class CollectContextTests
         Assert.False(context.ManifestTruncated);
     }
 
+    // --- Quest sequence manifest ---------------------------------------------------------------
+    // Same funnel idea as the item manifest: server-controlled input consumed on the framework
+    // thread, so the size bound lives here, in the one place every consumer reads it through.
+
+    [Fact]
+    public void The_quest_sequence_manifest_is_empty_without_a_config_or_the_field()
+    {
+        Assert.Empty(new CollectContext { RemoteConfig = null }.QuestSequenceManifest);
+
+        // An older server that never sends the field reads the same as "nothing to check".
+        Assert.Empty(
+            new CollectContext { RemoteConfig = ConfigWith(Array.Empty<uint>()) }
+                .QuestSequenceManifest);
+    }
+
+    [Fact]
+    public void A_sane_quest_sequence_manifest_passes_through_untouched()
+    {
+        var config = ConfigWith(Array.Empty<uint>()) with
+        {
+            QuestSequenceManifest = new uint[] { 70562, 69208 },
+        };
+
+        var context = new CollectContext { RemoteConfig = config };
+
+        Assert.Equal(new uint[] { 70562, 69208 }, context.QuestSequenceManifest);
+    }
+
+    // Each id costs a walk of the game's active-quest array on the framework thread — cheap, but
+    // not free a million times over. Same hostile-backend reasoning as the item manifest cap.
+    [Fact]
+    public void An_oversized_quest_sequence_manifest_is_truncated_to_the_cap()
+    {
+        var oversized = Enumerable.Range(1, CollectContext.MaxManifestItems + 500)
+            .Select(id => (uint)id)
+            .ToArray();
+        var config = ConfigWith(Array.Empty<uint>()) with { QuestSequenceManifest = oversized };
+
+        var bounded = new CollectContext { RemoteConfig = config }.QuestSequenceManifest;
+
+        Assert.Equal(CollectContext.MaxManifestItems, bounded.Count);
+        Assert.Equal(1u, bounded[0]);
+        Assert.Equal((uint)CollectContext.MaxManifestItems, bounded[^1]);
+    }
+
+    // The quest-sequence clip gets the same observability as the item clip: silent at the point
+    // of use, surfaced through a flag so the orchestrator can say so in the log.
+    [Fact]
+    public void The_quest_sequence_truncation_flag_is_off_without_a_config_or_at_the_cap()
+    {
+        Assert.False(new CollectContext { RemoteConfig = null }.QuestSequenceManifestTruncated);
+
+        var exact = Enumerable.Range(1, CollectContext.MaxManifestItems)
+            .Select(id => (uint)id)
+            .ToArray();
+        var config = ConfigWith(Array.Empty<uint>()) with { QuestSequenceManifest = exact };
+
+        Assert.False(
+            new CollectContext { RemoteConfig = config }.QuestSequenceManifestTruncated);
+    }
+
+    [Fact]
+    public void The_quest_sequence_truncation_flag_is_on_for_an_oversized_manifest()
+    {
+        var oversized = Enumerable.Range(1, CollectContext.MaxManifestItems + 1)
+            .Select(id => (uint)id)
+            .ToArray();
+        var config = ConfigWith(Array.Empty<uint>()) with { QuestSequenceManifest = oversized };
+
+        Assert.True(new CollectContext { RemoteConfig = config }.QuestSequenceManifestTruncated);
+    }
+
     [Fact]
     public void The_enabled_group_list_is_empty_without_a_config()
     {

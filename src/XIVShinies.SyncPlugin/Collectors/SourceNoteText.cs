@@ -144,6 +144,23 @@ public static class SourceNoteText
                     Text = "Glamour Dresser: not scanned yet — open it once in game to include it.",
                 },
 
+            // The one source no player action can fold in: the game fetches a mannequin's contents
+            // per-interaction inside the house and never caches them, so no plugin can read them
+            // from anywhere. Information rather than a fault — a full line would nag forever about
+            // something unfixable — so this is a muted chip whose hover carries the explanation and
+            // the optional retrieve-once workaround. "Keeps proof" is deliberate: a sighting proves
+            // the piece permanently, but a count drops again once the piece leaves the bags.
+            (SourceKeys.Mannequins, SourceStates.Unreadable) =>
+                new SourceNote
+                {
+                    Label = "Mannequins",
+                    Tone = SourceTone.Unreadable,
+                    Detail = "Gear displayed on housing mannequins can't be read — the game " +
+                        "never stores a mannequin's contents anywhere the plugin can see. To " +
+                        "register a piece: retrieve it to your bags, sync, then put it back. " +
+                        "XIV Shinies keeps proof it saw the piece.",
+                },
+
             // Unknown source key, or a known source in a state with no note above: say nothing.
             _ => null,
         };
@@ -217,13 +234,14 @@ public static class SourceNoteText
 /// knowing which source or scan state produced it.
 /// </summary>
 /// <remarks>
-/// Three tones cover every note <see cref="SourceNoteText.Describe"/> can return: <see cref="Live"/>
+/// Four tones cover every note <see cref="SourceNoteText.Describe"/> can return: <see cref="Live"/>
 /// for a source read fresh this pass, <see cref="Cached"/> for one whose numbers are real but possibly
-/// stale, and <see cref="Missing"/> for one that has contributed nothing at all yet. The window maps
-/// each tone to a color, an icon, and a form (Live and Cached notes render as compact chips, Missing
-/// notes as full lines — see <see cref="SourceNote"/>) with switches of its own — switches on this
-/// enum, never on a source name or wire state string, which is what keeps a future source's notes
-/// renderable without touching the window's drawing code.
+/// stale, <see cref="Missing"/> for one that has contributed nothing at all yet, and
+/// <see cref="Unreadable"/> for one the game itself never exposes. The window maps each tone to a
+/// color, an icon, and a form (Missing notes render as full lines, every other tone as a compact chip
+/// — see <see cref="SourceNote"/>) with switches of its own — switches on this enum, never on a
+/// source name or wire state string, which is what keeps a future source's notes renderable without
+/// touching the window's drawing code.
 /// </remarks>
 public enum SourceTone
 {
@@ -235,6 +253,12 @@ public enum SourceTone
 
     /// <summary>Never opened this session, so the source has contributed nothing yet.</summary>
     Missing,
+
+    /// <summary>
+    /// The game never exposes this source to plugins, and no player action changes that. Purely
+    /// informational — a muted chip, never an alarm, with any optional workaround in its hover.
+    /// </summary>
+    Unreadable,
 }
 
 /// <summary>
@@ -246,8 +270,8 @@ public enum SourceTone
 /// <para>
 /// A note carries its own copy and tone, which keeps the window a pure printer: it renders exactly
 /// what it is handed, with no branch of its own on which source or scan state is behind a note. The
-/// tone picks the form — <see cref="SourceTone.Live"/> and <see cref="SourceTone.Cached"/> notes draw
-/// as chips, <see cref="SourceTone.Missing"/> notes as full lines.
+/// tone picks the form — <see cref="SourceTone.Missing"/> notes draw as full lines; every other
+/// tone draws as a compact chip.
 /// </para>
 /// <para>
 /// The split between the optional properties encodes one design rule: <b>hover may hide optional
@@ -274,7 +298,9 @@ public sealed record SourceNote
 
     /// <summary>
     /// Optional hover copy for the chip form: what the source covers, or an optional refresh action.
-    /// Never the only home of a required action.
+    /// Never the only home of a required action. Required on <see cref="SourceTone.Unreadable"/>
+    /// notes, where the hover is the chip's only content beyond its label (a test sweeps the copy
+    /// set to enforce it).
     /// </summary>
     public string? Detail { get; init; }
 }

@@ -137,6 +137,39 @@ public class CollectorRunnerTests
         Assert.False(snapshot.ManifestTruncated);
     }
 
+    // The quest-sequence clip takes the same runner-to-orchestrator handoff as the item clip.
+    [Fact]
+    public void The_snapshot_carries_the_quest_sequence_truncation_verdict()
+    {
+        var oversized = new uint[CollectContext.MaxManifestItems + 1];
+        for (var i = 0; i < oversized.Length; i++)
+            oversized[i] = (uint)(i + 1);
+
+        var config = RemoteConfig() with { QuestSequenceManifest = oversized };
+
+        var snapshot = CollectorRunner.Run(
+            new[] { Collecting(UnknownCategory, 42) }, OptedIn(UnknownCategory), config);
+
+        Assert.True(snapshot.QuestSequenceManifestTruncated);
+        Assert.False(snapshot.ManifestTruncated); // the two clips report independently
+    }
+
+    // Facts shaped as a JSON OBJECT (quest id → sequence) must ride the same generic path as
+    // arrays. This is the shape guard: a runner regression that assumed AsArray() would pass
+    // every array-based test in this file and still crash the first object category in game.
+    [Fact]
+    public void Object_shaped_facts_flow_through_untouched()
+    {
+        var collector = new FakeCollector(UnknownCategory, () => CollectResult.Sequences(
+            new Dictionary<uint, byte> { [70562] = 3 }));
+
+        var snapshot = CollectorRunner.Run(
+            new[] { collector }, OptedIn(UnknownCategory), RemoteConfig());
+
+        Assert.Equal(
+            3, snapshot.Collections[UnknownCategory].AsObject()["70562"]!.GetValue<int>());
+    }
+
     [Fact]
     public void A_category_the_user_never_opted_into_is_omitted()
     {

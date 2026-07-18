@@ -82,6 +82,14 @@ public sealed record CollectionSnapshot
     /// to do with it.
     /// </summary>
     public bool ManifestTruncated { get; init; }
+
+    /// <summary>
+    /// True when this pass's quest-sequence manifest was clipped at the client's ceiling (see
+    /// <see cref="CollectContext.QuestSequenceManifestTruncated"/>). The same runner-to-caller
+    /// handoff as <see cref="ManifestTruncated"/>, kept separate so the orchestrator's warning
+    /// can name which manifest was clipped.
+    /// </summary>
+    public bool QuestSequenceManifestTruncated { get; init; }
 }
 
 /// <summary>
@@ -198,6 +206,7 @@ public static class CollectorRunner
             SourceNotes = sourceNotes,
             ManifestDrivenKeys = manifestDrivenKeys,
             ManifestTruncated = context.ManifestTruncated,
+            QuestSequenceManifestTruncated = context.QuestSequenceManifestTruncated,
         };
     }
 }

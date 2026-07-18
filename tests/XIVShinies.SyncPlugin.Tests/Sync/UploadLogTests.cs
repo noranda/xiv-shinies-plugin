@@ -64,15 +64,32 @@ public class UploadLogTests
         Assert.Equal(0, category.Count);
     }
 
-    // Every collector today emits a JSON array, so this branch is purely defensive — but a
-    // formatter that CAN misread a future non-array shape as zero facts eventually will, so the
-    // "count it as one rather than crash or hide it" fallback is pinned.
+    // Object-shaped facts (questSequences: quest id → journal step) count their members, the same
+    // way an array counts its elements. The log is a transparency surface: "Quest progress 2" must
+    // mean two quests were reported.
     [Fact]
-    public void Draft_counts_a_non_array_fact_node_as_one()
+    public void Draft_counts_the_members_of_an_object_shaped_category()
     {
         var snapshot = SnapshotWith(collections: new Dictionary<string, JsonNode>
         {
-            ["future"] = JsonNode.Parse("""{"some":"object"}""")!,
+            ["questSequences"] = JsonNode.Parse("""{"70562":3,"69208":255}""")!,
+        });
+
+        var draft = UploadLogEntry.Draft(DateTimeOffset.UnixEpoch, SyncTrigger.Manual, snapshot);
+
+        var category = Assert.Single(draft.Categories);
+        Assert.Equal(2, category.Count);
+    }
+
+    // A shape the log has never seen (neither array nor object) is purely hypothetical — but a
+    // formatter that CAN misread it as zero facts eventually will, so the "count it as one rather
+    // than crash or hide it" fallback is pinned.
+    [Fact]
+    public void Draft_counts_a_scalar_fact_node_as_one()
+    {
+        var snapshot = SnapshotWith(collections: new Dictionary<string, JsonNode>
+        {
+            ["future"] = JsonNode.Parse("42")!,
         });
 
         var draft = UploadLogEntry.Draft(DateTimeOffset.UnixEpoch, SyncTrigger.Manual, snapshot);

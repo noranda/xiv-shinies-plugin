@@ -80,7 +80,12 @@ If the user only wants a draft PR for review and hasn't pushed yet, this step pu
 
 ## Changelog
 
-<user-visible bullets. One bullet per line, no nested lists.>
+<user-visible bullets. One bullet per line, no nested lists. Write them in the release
+changelog's style — **every bullet starts with a verb and stays ≤ 75 characters** — so
+they can flow into CHANGELOG.md at release time without rewording. That file's top
+section becomes the GitHub Release notes and the Discord #releases embed, where longer
+bullets wrap badly. Cap the list at ~5 bullets; a PR needing more is describing its
+diff, not its user-visible behavior.>
 
 - Bullet 1
 - Bullet 2
